@@ -1,0 +1,35 @@
+{
+  "name": "@adega/server",
+  "private": true,
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
+    "start": "node dist/index.js",
+    "migrate": "tsx src/db/migrate.ts",
+    "db:dev": "tsx scripts/dev-postgres.ts",
+    "seed": "tsx scripts/seed-dev.ts",
+    "tenant:status": "tsx scripts/tenant-status.ts",
+    "race-test": "tsx scripts/race-test.ts",
+    "close-race-test": "tsx scripts/close-race-test.ts"
+  },
+  "dependencies": {
+    "@adega/shared": "*",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.22.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.20.0",
+    "embedded-postgres": "^18.4.0-beta.17",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}
