@@ -12,14 +12,18 @@ function quoteLiteral(value: string): string {
  * ignoram policies. Idempotente: seguro rodar a cada deploy.
  */
 async function ensureAppRole(client: import('pg').PoolClient) {
+  // NOSUPERUSER/NOBYPASSRLS não são especificados explicitamente — são o
+  // padrão do Postgres quando omitidos, e provedores gerenciados (Supabase)
+  // bloqueiam qualquer CREATE/ALTER ROLE que cite essas cláusulas mesmo como
+  // no-op, exigindo superuser real (que a role de conexão deles não tem).
   const { rows } = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [APP_DB_ROLE]);
   if (rows.length === 0) {
     await client.query(
-      `CREATE ROLE ${APP_DB_ROLE} LOGIN PASSWORD ${quoteLiteral(getAppDbPassword())} NOSUPERUSER NOBYPASSRLS`
+      `CREATE ROLE ${APP_DB_ROLE} LOGIN PASSWORD ${quoteLiteral(getAppDbPassword())}`
     );
   } else {
     await client.query(
-      `ALTER ROLE ${APP_DB_ROLE} WITH LOGIN PASSWORD ${quoteLiteral(getAppDbPassword())} NOSUPERUSER NOBYPASSRLS`
+      `ALTER ROLE ${APP_DB_ROLE} WITH LOGIN PASSWORD ${quoteLiteral(getAppDbPassword())}`
     );
   }
   await client.query(`GRANT USAGE ON SCHEMA public TO ${APP_DB_ROLE}`);

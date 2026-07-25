@@ -29,11 +29,17 @@ export const adminPool = new Pool({ connectionString: adminUrl, ssl, options: en
 // Pool da APLICAÇÃO: conecta com role não-privilegiado (adega_app), sujeito a
 // RLS. Mesmo host/porta/database do admin, credenciais próprias.
 const parsed = new URL(adminUrl);
+const adminUser = decodeURIComponent(parsed.username);
+// Pooler da Supabase (Supavisor) exige usuário no formato "<role>.<project_ref>"
+// — se a URL admin já vem nesse formato (ex: postgres.abcdef123), o pool da
+// aplicação precisa do mesmo sufixo, senão a autenticação falha em silêncio
+// (conexão aberta, mas comandos subsequentes retornam erro genérico).
+const poolerSuffix = adminUser.includes('.') ? adminUser.slice(adminUser.indexOf('.')) : '';
 export const pool = new Pool({
   host: parsed.hostname,
   port: parsed.port ? Number(parsed.port) : 5432,
   database: parsed.pathname.slice(1),
-  user: APP_DB_ROLE,
+  user: `${APP_DB_ROLE}${poolerSuffix}`,
   password: appDbPassword,
   ssl,
   options: encodingOptions,
