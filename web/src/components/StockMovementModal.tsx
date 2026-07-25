@@ -21,8 +21,10 @@ const typeLabels: Record<CreateStockMovementRequest['type'], string> = {
 };
 
 export function StockMovementModal({ product, onClose }: StockMovementModalProps) {
+  const [mode, setMode] = useState<'movimento' | 'inventario'>('movimento');
   const [type, setType] = useState<CreateStockMovementRequest['type']>('entrada_manual');
   const [quantity, setQuantity] = useState('');
+  const [countedQuantity, setCountedQuantity] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -37,9 +39,31 @@ export function StockMovementModal({ product, onClose }: StockMovementModalProps
     onError: (err: Error) => setError(err.message),
   });
 
+  const inventoryDelta =
+    countedQuantity.trim() !== '' ? Number(countedQuantity) - product.stockQuantity : null;
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (mode === 'inventario') {
+      if (countedQuantity.trim() === '' || Number.isNaN(Number(countedQuantity))) {
+        setError('Informe a quantidade contada fisicamente');
+        return;
+      }
+      if (inventoryDelta === 0) {
+        setError('A contagem já bate com o estoque atual — nada a ajustar');
+        return;
+      }
+      mutation.mutate({
+        productId: product.id,
+        type: 'ajuste',
+        quantity: inventoryDelta!,
+        reason: reason.trim() || 'Inventário — contagem física',
+      });
+      return;
+    }
+
     const qty = Number(quantity);
     if (!qty || (type !== 'ajuste' && qty <= 0)) {
       setError('Informe uma quantidade válida');
@@ -54,49 +78,105 @@ export function StockMovementModal({ product, onClose }: StockMovementModalProps
 
   return (
     <Modal title={`Movimentar estoque — ${product.name}`} onClose={onClose}>
+      <div className="mb-4 flex gap-1 border-b border-gray-200">
+        <button
+          type="button"
+          onClick={() => setMode('movimento')}
+          className={`px-3 py-2 text-sm font-medium ${
+            mode === 'movimento' ? 'border-b-2 border-amber-600 text-amber-600' : 'text-slate-500'
+          }`}
+        >
+          Movimento
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('inventario')}
+          className={`px-3 py-2 text-sm font-medium ${
+            mode === 'inventario' ? 'border-b-2 border-amber-600 text-amber-600' : 'text-slate-500'
+          }`}
+        >
+          Inventário (contagem)
+        </button>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
-        <p className="text-sm text-neutral-500">
-          Estoque atual: <span className="font-semibold">{product.stockQuantity}</span>
+        <p className="text-sm text-slate-500">
+          Estoque atual (sistema): <span className="font-semibold">{product.stockQuantity}</span>
         </p>
 
-        <div>
-          <label className="block text-sm font-medium text-neutral-700">Tipo</label>
-          <select
-            value={type}
-            onChange={(e) => setType(e.target.value as CreateStockMovementRequest['type'])}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
-          >
-            {Object.entries(typeLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {mode === 'inventario' ? (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-slate-500">
+                Quantidade contada fisicamente
+              </label>
+              <input
+                type="number"
+                value={countedQuantity}
+                onChange={(e) => setCountedQuantity(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+                autoFocus
+              />
+              {inventoryDelta !== null && inventoryDelta !== 0 && (
+                <p className={`mt-1 text-sm ${inventoryDelta > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  Ajuste: {inventoryDelta > 0 ? '+' : ''}
+                  {inventoryDelta} un.
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-500">Observação (opcional)</label>
+              <input
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Inventário — contagem física"
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-slate-500">Tipo</label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value as CreateStockMovementRequest['type'])}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+              >
+                {Object.entries(typeLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium text-neutral-700">
-            Quantidade {type === 'ajuste' && '(use negativo para reduzir)'}
-          </label>
-          <input
-            type="number"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
-            autoFocus
-          />
-        </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-500">
+                Quantidade {type === 'ajuste' && '(use negativo para reduzir)'}
+              </label>
+              <input
+                type="number"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+                autoFocus
+              />
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium text-neutral-700">Motivo</label>
-          <input
-            type="text"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Ex: compra fornecedor X, quebra, vencido..."
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
-          />
-        </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-500">Motivo</label>
+              <input
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Ex: compra fornecedor X, quebra, vencido..."
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+              />
+            </div>
+          </>
+        )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 

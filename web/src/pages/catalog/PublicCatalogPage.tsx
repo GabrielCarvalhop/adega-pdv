@@ -1,7 +1,7 @@
 import type {
   CatalogProduct,
   OrderFulfillment,
-  PaymentMethod,
+  PaymentMethodConfig,
   ProductCategory,
   StoreSettings,
 } from '@adega/shared';
@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { publicApi } from '../../api/public.api';
+import { AddonSelectionModal } from '../../components/AddonSelectionModal';
 import { formatBRL } from '../../utils/money';
 import { whatsappLink } from '../../utils/whatsapp';
 import { CustomerAuthFlow } from './CustomerAuthFlow';
@@ -18,9 +19,21 @@ import {
   loadCustomerProfile,
 } from './customerProfile';
 
+interface CartItemAddon {
+  addonOptionId: number;
+  label: string;
+  extraPriceCents: number;
+}
+
 interface CartItem {
   product: CatalogProduct;
   quantity: number;
+  addons?: CartItemAddon[];
+}
+
+function cartItemUnitPriceCents(item: CartItem): number {
+  const addonsExtra = item.addons?.reduce((sum, a) => sum + a.extraPriceCents, 0) ?? 0;
+  return item.product.salePriceCents + addonsExtra;
 }
 
 interface SavedOrder {
@@ -41,7 +54,7 @@ const categoryLabels: Record<string, string> = {
 };
 
 /** Tiles de vitrine (home) — agrupam produtos por subtítulo/categoria no estilo A7. */
-const showcaseTiles: { id: string; label: string; match: (p: CatalogProduct) => boolean }[] = [
+const specificTiles: { id: string; label: string; match: (p: CatalogProduct) => boolean }[] = [
   { id: 'cer-fardo', label: 'Cerveja 269ml · Fardos', match: (p) => p.category === 'cerveja' && (p.catalogSubtitle ?? '').includes('FARDO') },
   { id: 'cer-un', label: 'Cerveja · Unidade', match: (p) => p.category === 'cerveja' && !(p.catalogSubtitle ?? '').includes('FARDO') && !(p.catalogSubtitle ?? '').includes('LONG') },
   { id: 'cer-ln', label: 'Cerveja Long Neck', match: (p) => p.category === 'cerveja' && (p.catalogSubtitle ?? '').includes('LONG') },
@@ -63,6 +76,18 @@ const showcaseTiles: { id: string; label: string; match: (p: CatalogProduct) => 
   { id: 'salgado', label: 'Doces / Salgados', match: (p) => (p.catalogSubtitle ?? '').includes('SALGADO') },
   { id: 'combo', label: 'Combos', match: (p) => (p.catalogSubtitle ?? '').includes('COMBO') },
 ];
+
+/** Fallback: pega tudo que não bateu em nenhuma vitrine específica acima —
+ * evita que produtos "no cardápio" sem subtítulo cadastrado fiquem invisíveis
+ * na home (continuam visíveis por busca/categoria, mas sem isto não aparecem
+ * em nenhuma vitrine). Só é exibida quando tiver pelo menos 1 produto. */
+const outrosTile = {
+  id: 'outros',
+  label: 'Outros produtos',
+  match: (p: CatalogProduct) => !specificTiles.some((t) => t.match(p)),
+};
+
+const showcaseTiles = [...specificTiles, outrosTile];
 
 function ordersKey(slug: string) {
   return `adega_catalog_orders_${slug}`;
@@ -96,6 +121,7 @@ export function PublicCatalogPage() {
   const [tileFilter, setTileFilter] = useState<string | null>(null);
   const [placedOrder, setPlacedOrder] = useState<{ id: number; totalCents: number } | null>(null);
   const [savedOrders, setSavedOrders] = useState<SavedOrder[]>([]);
+  const [addonPrompt, setAddonPrompt] = useState<CatalogProduct | null>(null);
 
   useEffect(() => {
     if (!slug) return;
@@ -175,12 +201,21 @@ export function PublicCatalogPage() {
     return showcaseTiles.filter((t) => list.some(t.match));
   }, [products]);
 
-  function add(product: CatalogProduct) {
+  function pushCartItem(product: CatalogProduct, addons?: CartItemAddon[]) {
     setCart((prev) => {
       const idx = prev.findIndex((c) => c.product.id === product.id);
       if (idx >= 0) return prev.map((c, i) => (i === idx ? { ...c, quantity: c.quantity + 1 } : c));
-      return [...prev, { product, quantity: 1 }];
+      return [...prev, { product, quantity: 1, addons }];
     });
+  }
+
+  function add(product: CatalogProduct) {
+    const alreadyInCart = cart.some((c) => c.product.id === product.id);
+    if (alreadyInCart || product.addonGroups.length === 0) {
+      pushCartItem(product);
+      return;
+    }
+    setAddonPrompt(product);
   }
 
   function changeQty(productId: number, delta: number) {
@@ -197,7 +232,7 @@ export function PublicCatalogPage() {
     setTileFilter(null);
   }
 
-  const subtotalCents = cart.reduce((s, c) => s + c.product.salePriceCents * c.quantity, 0);
+  const subtotalCents = cart.reduce((s, c) => s + cartItemUnitPriceCents(c) * c.quantity, 0);
   const itemCount = cart.reduce((s, c) => s + c.quantity, 0);
 
   if (storeError) {
@@ -452,6 +487,22 @@ export function PublicCatalogPage() {
         />
       )}
 
+      {addonPrompt && (
+        <AddonSelectionModal
+          productName={addonPrompt.name}
+          groups={addonPrompt.addonGroups}
+          onCancel={() => setAddonPrompt(null)}
+          onConfirm={(selections) => {
+            const addons = selections.map((s) => {
+              const option = addonPrompt.addonGroups.flatMap((g) => g.options).find((o) => o.id === s.addonOptionId)!;
+              return { addonOptionId: option.id, label: option.label, extraPriceCents: option.extraPriceCents };
+            });
+            pushCartItem(addonPrompt, addons);
+            setAddonPrompt(null);
+          }}
+        />
+      )}
+
       {tab === 'inicio' && cart.length > 0 && !checkout && !promosOpen && !authOpen && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-white p-3 lg:hidden">
           <button
@@ -470,6 +521,7 @@ export function PublicCatalogPage() {
           slug={slug!}
           cart={cart}
           settings={store.settings}
+          paymentMethods={store.paymentMethods}
           profile={profile}
           subtotalCents={subtotalCents}
           onClose={() => setCheckout(false)}
@@ -850,6 +902,14 @@ function ProductBrowse({
                     {(p.catalogSubtitle || p.brand) && (
                       <p className="truncate text-xs text-neutral-500">{p.catalogSubtitle || p.brand}</p>
                     )}
+                    {p.quantityDiscounts.length > 0 && (
+                      <p className="mt-0.5 text-[11px] font-semibold text-amber-600">
+                        A partir de {p.quantityDiscounts[0].minQuantity} un.:{' '}
+                        {p.quantityDiscounts[0].discountType === 'percent'
+                          ? `${p.quantityDiscounts[0].discountValue}% off`
+                          : `${formatBRL(p.quantityDiscounts[0].discountValue)} off/un.`}
+                      </p>
+                    )}
                     <div className="mt-auto flex items-end justify-between gap-2 pt-2">
                       <p className="font-bold text-emerald-600">{formatBRL(p.salePriceCents)}</p>
                       {p.available ? (
@@ -940,8 +1000,11 @@ function CartPanel({
             <li key={c.product.id} className="flex items-start justify-between gap-2 text-sm">
               <div className="min-w-0">
                 <p className="truncate font-medium uppercase">{c.product.name}</p>
+                {c.addons && c.addons.length > 0 && (
+                  <p className="truncate text-xs text-neutral-400">{c.addons.map((a) => a.label).join(', ')}</p>
+                )}
                 <p className="text-neutral-500">
-                  {c.quantity} × {formatBRL(c.product.salePriceCents)}
+                  {c.quantity} × {formatBRL(cartItemUnitPriceCents(c))}
                 </p>
               </div>
               <QtyControl qty={c.quantity} onChange={(d) => onChangeQty(c.product.id, d)} />
@@ -1122,6 +1185,7 @@ function CheckoutSheet({
   slug,
   cart,
   settings,
+  paymentMethods,
   profile,
   subtotalCents,
   onClose,
@@ -1131,34 +1195,66 @@ function CheckoutSheet({
   slug: string;
   cart: CartItem[];
   settings: StoreSettings;
+  paymentMethods: PaymentMethodConfig[];
   profile: CatalogCustomerProfile | null;
   subtotalCents: number;
   onClose: () => void;
   onChangeQty: (id: number, delta: number) => void;
   onPlaced: (order: { id: number; totalCents: number }) => void;
 }) {
+  const activeMethods = paymentMethods.filter((m) => m.active);
   const defaultFulfillment: OrderFulfillment = settings.deliveryEnabled ? 'entrega' : 'retirada';
   const [fulfillment, setFulfillment] = useState<OrderFulfillment>(defaultFulfillment);
   const [name, setName] = useState(profile?.name ?? '');
   const [phone, setPhone] = useState(profile ? formatPhoneMask(profile.phone) : '');
   const [address, setAddress] = useState(profile?.address ?? '');
+  const [district, setDistrict] = useState('');
   const [notes, setNotes] = useState('');
-  const [payment, setPayment] = useState<PaymentMethod>('pix');
+  const [paymentMethodId, setPaymentMethodId] = useState<number | null>(
+    activeMethods.find((m) => m.kind === 'pix')?.id ?? activeMethods[0]?.id ?? null
+  );
+  const selectedMethod = activeMethods.find((m) => m.id === paymentMethodId) ?? null;
   const [needsChange, setNeedsChange] = useState(false);
   const [changeFor, setChangeFor] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [publicKey] = useState(() => crypto.randomUUID());
 
-  const feeCents = fulfillment === 'entrega' ? settings.deliveryFeeCents : 0;
+  const zoneCheckEnabled =
+    fulfillment === 'entrega' && settings.deliveryZoneMode !== 'off' && district.trim().length > 1;
+  const { data: deliveryCheck, isFetching: checkingDelivery } = useQuery({
+    queryKey: ['delivery-check', slug, district, subtotalCents],
+    queryFn: () => publicApi.deliveryCheck(slug, district.trim(), subtotalCents),
+    enabled: zoneCheckEnabled,
+  });
+
+  const feeCents =
+    fulfillment === 'entrega'
+      ? zoneCheckEnabled && deliveryCheck
+        ? deliveryCheck.feeCents
+        : settings.deliveryFeeCents
+      : 0;
   const totalCents = subtotalCents + feeCents;
   const belowMinimum = settings.minOrderCents > 0 && subtotalCents < settings.minOrderCents;
   const wa = settings.whatsapp ? whatsappLink(settings.whatsapp) : null;
+  const deliveryBlocked = Boolean(zoneCheckEnabled && deliveryCheck && !deliveryCheck.allowed);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (payment === 'dinheiro' && needsChange) {
+    if (!paymentMethodId) {
+      setError('Selecione uma forma de pagamento');
+      return;
+    }
+    if (fulfillment === 'entrega' && settings.deliveryZoneMode !== 'off' && !district.trim()) {
+      setError(settings.deliveryZoneMode === 'cep' ? 'Informe o CEP' : 'Informe o bairro');
+      return;
+    }
+    if (deliveryBlocked) {
+      setError(deliveryCheck?.reason ?? 'Entrega indisponível para esta região');
+      return;
+    }
+    if (selectedMethod?.allowsChange && needsChange) {
       const changeCents = parseMoney(changeFor);
       if (changeCents < totalCents) {
         setError('O valor para troco deve ser maior ou igual ao total do pedido');
@@ -1172,12 +1268,17 @@ function CheckoutSheet({
         customerName: name.trim(),
         customerPhone: phone.trim(),
         address: address.trim() || undefined,
+        district: district.trim() || undefined,
         notes: notes.trim() || undefined,
-        paymentMethodIntent: payment,
+        paymentMethodIntentId: paymentMethodId,
         changeForCents:
-          payment === 'dinheiro' && needsChange ? parseMoney(changeFor) : undefined,
+          selectedMethod?.allowsChange && needsChange ? parseMoney(changeFor) : undefined,
         publicKey,
-        items: cart.map((c) => ({ productId: c.product.id, quantity: c.quantity })),
+        items: cart.map((c) => ({
+          productId: c.product.id,
+          quantity: c.quantity,
+          addons: c.addons?.map((a) => ({ addonOptionId: a.addonOptionId })),
+        })),
       });
       onPlaced(order);
     } catch (err) {
@@ -1202,9 +1303,14 @@ function CheckoutSheet({
             <li key={c.product.id} className="flex items-center justify-between text-sm">
               <span className="truncate pr-2">
                 {c.quantity}× {c.product.name}
+                {c.addons && c.addons.length > 0 && (
+                  <span className="block text-xs text-neutral-400">
+                    {c.addons.map((a) => a.label).join(', ')}
+                  </span>
+                )}
               </span>
               <div className="flex items-center gap-2">
-                <span className="font-medium">{formatBRL(c.product.salePriceCents * c.quantity)}</span>
+                <span className="font-medium">{formatBRL(cartItemUnitPriceCents(c) * c.quantity)}</span>
                 <button type="button" onClick={() => onChangeQty(c.product.id, -1)} className="text-neutral-400">
                   −
                 </button>
@@ -1271,6 +1377,28 @@ function CheckoutSheet({
               className="w-full rounded-xl border border-neutral-300 px-3 py-2.5"
             />
           )}
+          {fulfillment === 'entrega' && settings.deliveryZoneMode !== 'off' && (
+            <div>
+              <input
+                value={district}
+                onChange={(e) => setDistrict(e.target.value)}
+                placeholder={settings.deliveryZoneMode === 'cep' ? 'CEP' : 'Bairro'}
+                required
+                className="w-full rounded-xl border border-neutral-300 px-3 py-2.5"
+              />
+              {checkingDelivery && <p className="mt-1 text-xs text-neutral-400">Verificando entrega...</p>}
+              {deliveryBlocked && (
+                <p className="mt-1 text-xs font-medium text-red-600">
+                  {deliveryCheck?.reason ?? 'Não entregamos nessa região'}
+                </p>
+              )}
+              {zoneCheckEnabled && deliveryCheck?.allowed && (
+                <p className="mt-1 text-xs text-emerald-600">
+                  Entregamos aí — taxa de {formatBRL(deliveryCheck.feeCents)}
+                </p>
+              )}
+            </div>
+          )}
           {profile && (
             <p className="text-xs text-neutral-500">
               Dados preenchidos da sua conta neste aparelho.
@@ -1289,41 +1417,24 @@ function CheckoutSheet({
               Pagamento na {fulfillment === 'entrega' ? 'entrega' : 'retirada'}
             </p>
             <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  ['pix', 'Pix'],
-                  ['dinheiro', 'Dinheiro'],
-                  ['credito', 'Cartão'],
-                ] as const
-              ).map(([value, label]) => (
+              {activeMethods.map((m) => (
                 <button
-                  key={value}
+                  key={m.id}
                   type="button"
-                  onClick={() => setPayment(value === 'credito' ? 'credito' : value)}
+                  onClick={() => setPaymentMethodId(m.id)}
                   className={`rounded-xl border px-2 py-2.5 text-xs font-semibold sm:text-sm ${
-                    payment === value ||
-                    (value === 'credito' && (payment === 'credito' || payment === 'debito'))
+                    paymentMethodId === m.id
                       ? 'border-black bg-black text-white'
                       : 'border-neutral-200'
                   }`}
                 >
-                  {label}
+                  {m.label}
                 </button>
               ))}
             </div>
-            {(payment === 'credito' || payment === 'debito') && (
-              <select
-                value={payment}
-                onChange={(e) => setPayment(e.target.value as PaymentMethod)}
-                className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm"
-              >
-                <option value="credito">Cartão crédito</option>
-                <option value="debito">Cartão débito</option>
-              </select>
-            )}
           </div>
 
-          {payment === 'dinheiro' && (
+          {selectedMethod?.allowsChange && (
             <div className="rounded-xl border border-neutral-200 p-3">
               <label className="flex items-center gap-2 text-sm text-neutral-700">
                 <input
@@ -1372,7 +1483,7 @@ function CheckoutSheet({
 
           <button
             type="submit"
-            disabled={submitting || belowMinimum || cart.length === 0}
+            disabled={submitting || belowMinimum || cart.length === 0 || deliveryBlocked}
             className="w-full rounded-xl bg-black py-3.5 text-sm font-semibold uppercase text-white disabled:opacity-50"
           >
             {submitting ? 'Enviando...' : 'Enviar pedido'}

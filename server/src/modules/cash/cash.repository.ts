@@ -14,6 +14,8 @@ interface CashSessionRow {
   opened_by_user_id: number | null;
   closed_by_user_id: number | null;
   notes: string | null;
+  opened_by_user_name?: string | null;
+  closed_by_user_name?: string | null;
 }
 
 function mapSessionRow(row: CashSessionRow): CashSession {
@@ -29,9 +31,18 @@ function mapSessionRow(row: CashSessionRow): CashSession {
     closedAt: row.closed_at,
     openedByUserId: row.opened_by_user_id,
     closedByUserId: row.closed_by_user_id,
+    openedByUserName: row.opened_by_user_name ?? null,
+    closedByUserName: row.closed_by_user_name ?? null,
     notes: row.notes,
   };
 }
+
+const SESSION_SELECT = `
+  SELECT cs.*, ou.name AS opened_by_user_name, cu.name AS closed_by_user_name
+  FROM cash_sessions cs
+  LEFT JOIN users ou ON ou.id = cs.opened_by_user_id
+  LEFT JOIN users cu ON cu.id = cs.closed_by_user_id
+`;
 
 interface CashMovementRow {
   id: number;
@@ -57,13 +68,20 @@ function mapMovementRow(row: CashMovementRow): CashMovement {
 
 export async function listOpenSessions(client: PoolClient): Promise<CashSession[]> {
   const { rows } = await client.query(
-    "SELECT * FROM cash_sessions WHERE status = 'aberto' ORDER BY register_label ASC"
+    `${SESSION_SELECT} WHERE cs.status = 'aberto' ORDER BY cs.register_label ASC`
   );
   return rows.map(mapSessionRow);
 }
 
 export async function findById(client: PoolClient, id: number): Promise<CashSession | undefined> {
-  const { rows } = await client.query('SELECT * FROM cash_sessions WHERE id = $1', [id]);
+  const { rows } = await client.query(`${SESSION_SELECT} WHERE cs.id = $1`, [id]);
+  return rows[0] ? mapSessionRow(rows[0]) : undefined;
+}
+
+/** Trava a linha da sessão até o fim da transação — serializa chamadas
+ * concorrentes de sangria/suprimento/fechamento no mesmo caixa. */
+export async function lockById(client: PoolClient, id: number): Promise<CashSession | undefined> {
+  const { rows } = await client.query('SELECT * FROM cash_sessions WHERE id = $1 FOR UPDATE', [id]);
   return rows[0] ? mapSessionRow(rows[0]) : undefined;
 }
 
@@ -76,15 +94,15 @@ export async function listHistory(
   const params: unknown[] = [];
   if (from) {
     params.push(from);
-    clauses.push(`opened_at >= $${params.length}`);
+    clauses.push(`cs.opened_at >= $${params.length}`);
   }
   if (to) {
     params.push(to);
-    clauses.push(`opened_at <= $${params.length}`);
+    clauses.push(`cs.opened_at <= $${params.length}`);
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const { rows } = await client.query(
-    `SELECT * FROM cash_sessions ${where} ORDER BY opened_at DESC`,
+    `${SESSION_SELECT} ${where} ORDER BY cs.opened_at DESC`,
     params
   );
   return rows.map(mapSessionRow);
@@ -112,15 +130,15 @@ export async function closeSession(
   differenceCents: number,
   notes: string | null,
   userId: number | null
-): Promise<CashSession> {
+): Promise<CashSession | undefined> {
   const { rows } = await client.query(
     `UPDATE cash_sessions SET
       status = 'fechado', expected_amount_cents = $1, counted_amount_cents = $2,
       difference_cents = $3, notes = $4, closed_at = now(), closed_by_user_id = $5
-     WHERE id = $6 RETURNING *`,
+     WHERE id = $6 AND status = 'aberto' RETURNING *`,
     [expectedAmountCents, countedAmountCents, differenceCents, notes, userId, id]
   );
-  return mapSessionRow(rows[0]);
+  return rows[0] ? mapSessionRow(rows[0]) : undefined;
 }
 
 export async function listMovements(client: PoolClient, sessionId: number): Promise<CashMovement[]> {
@@ -164,7 +182,8 @@ export async function sumCashSales(client: PoolClient, sessionId: number): Promi
     `SELECT COALESCE(SUM(p.amount_cents), 0)::int AS total
      FROM payments p
      JOIN sales s ON s.id = p.sale_id
-     WHERE s.cash_session_id = $1 AND s.status = 'concluida' AND p.method = 'dinheiro'`,
+     JOIN payment_methods pm ON pm.id = p.payment_method_id
+     WHERE s.cash_session_id = $1 AND s.status = 'concluida' AND pm.kind = 'dinheiro'`,
     [sessionId]
   );
   return rows[0].total;
@@ -175,17 +194,19 @@ export interface PaymentBreakdownRow {
   total: number;
 }
 
-/** Soma de pagamentos por método das vendas concluídas de uma sessão. */
+/** Soma de pagamentos por código de meio de pagamento das vendas concluídas
+ * de uma sessão — chaves dinâmicas, dependem dos payment_methods do tenant. */
 export async function paymentBreakdown(
   client: PoolClient,
   sessionId: number
 ): Promise<PaymentBreakdownRow[]> {
   const { rows } = await client.query(
-    `SELECT p.method, COALESCE(SUM(p.amount_cents), 0)::int AS total
+    `SELECT pm.code AS method, COALESCE(SUM(p.amount_cents), 0)::int AS total
      FROM payments p
      JOIN sales s ON s.id = p.sale_id
+     JOIN payment_methods pm ON pm.id = p.payment_method_id
      WHERE s.cash_session_id = $1 AND s.status = 'concluida'
-     GROUP BY p.method`,
+     GROUP BY pm.code`,
     [sessionId]
   );
   return rows;

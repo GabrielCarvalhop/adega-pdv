@@ -41,7 +41,15 @@ function requireAccountAuth(req: Request, _res: Response, next: NextFunction) {
 
 export const accountRouter = Router();
 
+// Autoatendimento fechado por enquanto — lojas novas são criadas pelo
+// SUPER_ADMIN em /admin (ver platformAdmin.routes.ts). Reabilitar quando o
+// negócio decidir escalar por autoatendimento público de novo.
+const SIGNUP_ENABLED = false;
+
 accountRouter.post('/signup', validateBody(signupSchema), async (req, res) => {
+  if (!SIGNUP_ENABLED) {
+    throw new AppError('Cadastro por autoatendimento está temporariamente indisponível', 403);
+  }
   res.status(201).json(await service.signup(req.body));
 });
 

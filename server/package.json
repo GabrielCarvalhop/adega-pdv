@@ -5,18 +5,22 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && node -e \"require('fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').rmSync('dist/db/migrations',{recursive:true,force:true});require('fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
     "start": "node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
     "db:dev": "tsx scripts/dev-postgres.ts",
     "seed": "tsx scripts/seed-dev.ts",
     "tenant:status": "tsx scripts/tenant-status.ts",
+    "seed:super-admin": "tsx scripts/seed-super-admin.ts",
     "race-test": "tsx scripts/race-test.ts",
-    "close-race-test": "tsx scripts/close-race-test.ts"
+    "close-race-test": "tsx scripts/close-race-test.ts",
+    "cash-race-test": "tsx scripts/cash-race-test.ts"
   },
   "dependencies": {
     "@adega/shared": "*",
+    "@supabase/supabase-js": "^2.110.8",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.22.0",

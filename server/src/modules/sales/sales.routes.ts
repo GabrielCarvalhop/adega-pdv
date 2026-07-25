@@ -10,10 +10,12 @@ const saleItemSchema = z.object({
   quantity: z.number().int().positive(),
   unitPriceCents: z.number().int().min(0),
   discountCents: z.number().int().min(0).optional(),
+  notes: z.string().max(300).optional(),
+  addons: z.array(z.object({ addonOptionId: z.number().int().positive() })).optional(),
 });
 
 const paymentSchema = z.object({
-  method: z.enum(['dinheiro', 'debito', 'credito', 'pix']),
+  paymentMethodId: z.number().int().positive(),
   amountCents: z.number().int().positive(),
   amountReceivedCents: z.number().int().min(0).optional(),
 });
@@ -25,6 +27,7 @@ const createSaleSchema = z.object({
   customerId: z.number().int().positive().optional(),
   cashSessionId: z.number().int().positive().optional(),
   notes: z.string().optional(),
+  saleType: z.enum(['varejo', 'atacado']).optional(),
 });
 
 const cancelSchema = z.object({
@@ -36,7 +39,7 @@ export const salesRouter = Router();
 salesRouter.get('/', async (req, res) => {
   const { from, to, status } = req.query;
   res.json(
-    await service.listSales(req.auth!.tenantId, {
+    await service.listSales(req.auth!.tenantId!, {
       from: typeof from === 'string' ? from : undefined,
       to: typeof to === 'string' ? to : undefined,
       status: typeof status === 'string' ? status : undefined,
@@ -47,24 +50,24 @@ salesRouter.get('/', async (req, res) => {
 salesRouter.get('/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) throw new AppError('ID inválido');
-  res.json(await service.getSaleDetail(req.auth!.tenantId, id));
+  res.json(await service.getSaleDetail(req.auth!.tenantId!, id));
 });
 
 salesRouter.post('/', validateBody(createSaleSchema), async (req, res) => {
-  res.status(201).json(await service.completeSale(req.auth!.tenantId, req.body, req.auth!.userId));
+  res.status(201).json(await service.completeSale(req.auth!.tenantId!, req.body, req.auth!.userId));
 });
 
-salesRouter.post('/:id/cancel', requireRole('gerente', 'admin'), validateBody(cancelSchema), async (req, res) => {
+salesRouter.post('/:id/cancel', requireRole('GERENTE', 'ADMIN_LOJA'), validateBody(cancelSchema), async (req, res) => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) throw new AppError('ID inválido');
-  res.json(await service.cancelSale(req.auth!.tenantId, id, req.body.reason, req.auth!.userId));
+  res.json(await service.cancelSale(req.auth!.tenantId!, id, req.body.reason, req.auth!.userId));
 });
 
-salesRouter.post('/:id/items/:itemId/cancel', requireRole('gerente', 'admin'), validateBody(cancelSchema), async (req, res) => {
+salesRouter.post('/:id/items/:itemId/cancel', requireRole('GERENTE', 'ADMIN_LOJA'), validateBody(cancelSchema), async (req, res) => {
   const id = Number(req.params.id);
   const itemId = Number(req.params.itemId);
   if (Number.isNaN(id) || Number.isNaN(itemId)) throw new AppError('ID inválido');
   res.json(
-    await service.cancelSaleItem(req.auth!.tenantId, id, itemId, req.body.reason, req.auth!.userId)
+    await service.cancelSaleItem(req.auth!.tenantId!, id, itemId, req.body.reason, req.auth!.userId)
   );
 });

@@ -9,16 +9,14 @@ function todayISO(): string {
 }
 
 function toCsv(date: string, data: NonNullable<ReturnType<typeof useConsolidated>['data']>): string {
-  const header = 'caixa;status;total;dinheiro;debito;credito;pix;divergencia';
+  const codes = data.paymentMethods.map((m) => m.code);
+  const header = ['caixa', 'status', 'total', ...codes, 'divergencia'].join(';');
   const lines = data.registers.map((r) =>
     [
       r.registerLabel,
       r.status,
       (r.salesTotalCents / 100).toFixed(2),
-      (r.paymentBreakdown.dinheiro / 100).toFixed(2),
-      (r.paymentBreakdown.debito / 100).toFixed(2),
-      (r.paymentBreakdown.credito / 100).toFixed(2),
-      (r.paymentBreakdown.pix / 100).toFixed(2),
+      ...codes.map((code) => ((r.paymentBreakdown[code] ?? 0) / 100).toFixed(2)),
       r.differenceCents !== null ? (r.differenceCents / 100).toFixed(2) : '',
     ].join(';')
   );
@@ -49,58 +47,57 @@ export function DailyConsolidatedPage() {
 
   return (
     <div className="p-8">
-      <h1 className="mb-6 text-2xl font-bold text-neutral-800">Relatórios</h1>
       <ReportsNav />
 
       <div className="mb-4 flex items-center gap-3">
-        <label className="text-sm text-neutral-600">Dia:</label>
+        <label className="text-sm text-slate-500">Dia:</label>
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+          className="rounded-xl border border-gray-300 px-3 py-1.5 text-sm"
         />
         {data && data.registers.length > 0 && (
-          <button onClick={exportCsv} className="text-sm text-blue-600 hover:underline">
+          <button onClick={exportCsv} className="text-sm text-amber-600 hover:underline">
             Exportar CSV
           </button>
         )}
       </div>
 
-      {isLoading && <p className="text-neutral-500">Carregando...</p>}
+      {isLoading && <p className="text-slate-500">Carregando...</p>}
 
       {data && data.registers.length === 0 && (
-        <p className="text-neutral-400">Nenhum caixa aberto neste dia.</p>
+        <p className="text-slate-400">Nenhum caixa aberto neste dia.</p>
       )}
 
       {data && data.registers.length > 0 && (
         <>
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b border-neutral-200 text-left text-neutral-500">
+              <tr className="border-b border-gray-300 text-left text-slate-500">
                 <th className="py-2">Caixa</th>
                 <th className="py-2">Status</th>
-                <th className="py-2 text-right">Dinheiro</th>
-                <th className="py-2 text-right">Débito</th>
-                <th className="py-2 text-right">Crédito</th>
-                <th className="py-2 text-right">Pix</th>
+                {data.paymentMethods.map((m) => (
+                  <th key={m.id} className="py-2 text-right">{m.label}</th>
+                ))}
                 <th className="py-2 text-right">Total</th>
                 <th className="py-2 text-right">Diverg.</th>
               </tr>
             </thead>
             <tbody>
               {data.registers.map((r) => (
-                <tr key={r.cashSessionId} className="border-b border-neutral-100">
-                  <td className="py-2 font-medium text-neutral-800">{r.registerLabel}</td>
+                <tr key={r.cashSessionId} className="border-b border-gray-200">
+                  <td className="py-2 font-medium text-gray-900">{r.registerLabel}</td>
                   <td className="py-2">{r.status === 'aberto' ? 'Aberto' : 'Fechado'}</td>
-                  <td className="py-2 text-right">{formatBRL(r.paymentBreakdown.dinheiro)}</td>
-                  <td className="py-2 text-right">{formatBRL(r.paymentBreakdown.debito)}</td>
-                  <td className="py-2 text-right">{formatBRL(r.paymentBreakdown.credito)}</td>
-                  <td className="py-2 text-right">{formatBRL(r.paymentBreakdown.pix)}</td>
+                  {data.paymentMethods.map((m) => (
+                    <td key={m.id} className="py-2 text-right">
+                      {formatBRL(r.paymentBreakdown[m.code] ?? 0)}
+                    </td>
+                  ))}
                   <td className="py-2 text-right font-medium">{formatBRL(r.salesTotalCents)}</td>
                   <td
                     className={`py-2 text-right ${
-                      r.differenceCents ? 'font-medium text-amber-600' : 'text-neutral-400'
+                      r.differenceCents ? 'font-medium text-amber-600' : 'text-slate-400'
                     }`}
                   >
                     {r.differenceCents !== null ? formatBRL(r.differenceCents) : '—'}
@@ -109,14 +106,15 @@ export function DailyConsolidatedPage() {
               ))}
             </tbody>
             <tfoot>
-              <tr className="border-t-2 border-neutral-300 font-semibold">
+              <tr className="border-t-2 border-gray-300 font-semibold">
                 <td className="py-2" colSpan={2}>
                   Total do dia
                 </td>
-                <td className="py-2 text-right">{formatBRL(data.totals.paymentBreakdown.dinheiro)}</td>
-                <td className="py-2 text-right">{formatBRL(data.totals.paymentBreakdown.debito)}</td>
-                <td className="py-2 text-right">{formatBRL(data.totals.paymentBreakdown.credito)}</td>
-                <td className="py-2 text-right">{formatBRL(data.totals.paymentBreakdown.pix)}</td>
+                {data.paymentMethods.map((m) => (
+                  <td key={m.id} className="py-2 text-right">
+                    {formatBRL(data.totals.paymentBreakdown[m.code] ?? 0)}
+                  </td>
+                ))}
                 <td className="py-2 text-right">{formatBRL(data.totals.salesTotalCents)}</td>
                 <td className="py-2 text-right">{formatBRL(data.totals.totalDifferenceCents)}</td>
               </tr>
@@ -124,13 +122,13 @@ export function DailyConsolidatedPage() {
           </table>
 
           <div className="mt-6 grid grid-cols-2 gap-4 md:w-96">
-            <div className="rounded-lg border border-neutral-200 p-4 text-center">
-              <p className="text-xl font-bold text-neutral-800">{formatBRL(data.totals.balcaoCents)}</p>
-              <p className="text-xs text-neutral-500">Balcão</p>
+            <div className="rounded-xl border border-gray-300 p-4 text-center">
+              <p className="text-xl font-bold text-gray-900">{formatBRL(data.totals.balcaoCents)}</p>
+              <p className="text-xs text-slate-500">Balcão</p>
             </div>
-            <div className="rounded-lg border border-neutral-200 p-4 text-center">
-              <p className="text-xl font-bold text-neutral-800">{formatBRL(data.totals.onlineCents)}</p>
-              <p className="text-xs text-neutral-500">Pedidos online</p>
+            <div className="rounded-xl border border-gray-300 p-4 text-center">
+              <p className="text-xl font-bold text-gray-900">{formatBRL(data.totals.onlineCents)}</p>
+              <p className="text-xs text-slate-500">Pedidos online</p>
             </div>
           </div>
         </>

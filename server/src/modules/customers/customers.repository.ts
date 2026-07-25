@@ -20,6 +20,8 @@ interface CustomerRow {
   notes: string | null;
   active: boolean;
   blocked: boolean;
+  balance_cents: number;
+  total_spent_cents?: number;
   created_at: string;
   updated_at: string;
 }
@@ -37,27 +39,42 @@ function mapRow(row: CustomerRow): Customer {
     notes: row.notes,
     active: row.active,
     blocked: row.blocked,
+    balanceCents: row.balance_cents,
+    totalSpentCents: row.total_spent_cents ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
+/** Junta o total gasto (soma de vendas concluídas) numa única query — evita
+ * N+1 ao listar/carregar clientes. */
+const SELECT_WITH_SPENT = `
+  SELECT c.*, COALESCE(spent.total, 0)::int AS total_spent_cents
+  FROM customers c
+  LEFT JOIN (
+    SELECT customer_id, SUM(total_cents) AS total
+    FROM sales
+    WHERE status = 'concluida' AND customer_id IS NOT NULL
+    GROUP BY customer_id
+  ) spent ON spent.customer_id = c.id
+`;
+
 export async function findAll(client: PoolClient, search?: string): Promise<Customer[]> {
   if (search) {
     const { rows } = await client.query(
-      `SELECT * FROM customers
-       WHERE active = TRUE AND (name ILIKE $1 OR phone ILIKE $1 OR document ILIKE $1 OR email ILIKE $1)
-       ORDER BY name ASC`,
+      `${SELECT_WITH_SPENT}
+       WHERE c.active = TRUE AND (c.name ILIKE $1 OR c.phone ILIKE $1 OR c.document ILIKE $1 OR c.email ILIKE $1)
+       ORDER BY c.name ASC`,
       [`%${search}%`]
     );
     return rows.map(mapRow);
   }
-  const { rows } = await client.query('SELECT * FROM customers WHERE active = TRUE ORDER BY name ASC');
+  const { rows } = await client.query(`${SELECT_WITH_SPENT} WHERE c.active = TRUE ORDER BY c.name ASC`);
   return rows.map(mapRow);
 }
 
 export async function findById(client: PoolClient, id: number): Promise<Customer | undefined> {
-  const { rows } = await client.query('SELECT * FROM customers WHERE id = $1', [id]);
+  const { rows } = await client.query(`${SELECT_WITH_SPENT} WHERE c.id = $1`, [id]);
   return rows[0] ? mapRow(rows[0]) : undefined;
 }
 
@@ -119,7 +136,9 @@ export async function update(
       id,
     ]
   );
-  return rows[0] ? mapRow(rows[0]) : undefined;
+  // UPDATE ... RETURNING não passa pelo JOIN de total gasto — preserva o
+  // valor já calculado em `existing` em vez de zerar.
+  return rows[0] ? { ...mapRow(rows[0]), totalSpentCents: existing.totalSpentCents } : undefined;
 }
 
 export async function softDelete(client: PoolClient, id: number): Promise<void> {

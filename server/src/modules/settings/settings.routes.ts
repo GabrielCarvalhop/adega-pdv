@@ -17,14 +17,17 @@ const updateSchema = z.object({
   catalogLogoUrl: z.string().max(500).nullable().optional(),
   catalogBannerUrl: z.string().max(500).nullable().optional(),
   cityText: z.string().max(120).nullable().optional(),
+  deliveryZoneMode: z.enum(['off', 'bairro', 'cep']).optional(),
+  fiadoDueDays: z.number().int().min(1).max(365).optional(),
+  freeDeliveryAboveCents: z.number().int().min(0).optional(),
 });
 
 export const settingsRouter = Router();
 
 settingsRouter.get('/', async (req, res) => {
-  res.json(await service.getSettings(req.auth!.tenantId));
+  res.json(await service.getSettings(req.auth!.tenantId!));
 });
 
-settingsRouter.put('/', requireRole('admin'), validateBody(updateSchema), async (req, res) => {
-  res.json(await service.updateSettings(req.auth!.tenantId, req.body));
+settingsRouter.put('/', requireRole('ADMIN_LOJA'), validateBody(updateSchema), async (req, res) => {
+  res.json(await service.updateSettings(req.auth!.tenantId!, req.body));
 });

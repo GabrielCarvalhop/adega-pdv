@@ -7,7 +7,7 @@ const statusLabels: Record<string, { label: string; className: string }> = {
   trialing: { label: 'Período de teste', className: 'bg-blue-100 text-blue-700' },
   active: { label: 'Assinatura ativa', className: 'bg-green-100 text-green-700' },
   past_due: { label: 'Pagamento pendente', className: 'bg-red-100 text-red-700' },
-  canceled: { label: 'Cancelada', className: 'bg-neutral-200 text-neutral-600' },
+  canceled: { label: 'Cancelada', className: 'bg-gray-200 text-slate-500' },
 };
 
 export function AccountDashboardPage() {
@@ -20,7 +20,7 @@ export function AccountDashboardPage() {
   });
 
   if (isLoading) {
-    return <div className="flex min-h-screen items-center justify-center text-neutral-400">Carregando...</div>;
+    return <div className="flex min-h-screen items-center justify-center text-slate-400">Carregando...</div>;
   }
 
   if (isError || !account) {
@@ -33,12 +33,12 @@ export function AccountDashboardPage() {
   const storeLoginPath = `/t/${account.store.slug}/login`;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-100">
+    <div className="flex min-h-screen items-center justify-center bg-gray-100">
       <div className="w-full max-w-lg rounded-xl bg-white p-8 shadow-lg">
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-neutral-800">{account.store.name}</h1>
-            <p className="text-sm text-neutral-500">{account.owner.email}</p>
+            <h1 className="text-2xl font-serif font-semibold text-gray-900">{account.store.name}</h1>
+            <p className="text-sm text-slate-500">{account.owner.email}</p>
           </div>
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${status.className}`}>
             {status.label}
@@ -53,13 +53,13 @@ export function AccountDashboardPage() {
           </div>
         )}
 
-        <div className="mb-6 rounded-lg border border-neutral-200 p-4">
-          <p className="mb-1 text-sm font-medium text-neutral-700">Acesso do caixa (sua equipe)</p>
-          <Link to={storeLoginPath} className="font-mono text-sm text-blue-600 hover:underline">
+        <div className="mb-6 rounded-xl border border-gray-300 p-4">
+          <p className="mb-1 text-sm font-medium text-slate-500">Acesso do caixa (sua equipe)</p>
+          <Link to={storeLoginPath} className="font-mono text-sm text-amber-600 hover:underline">
             {window.location.origin}
             {storeLoginPath}
           </Link>
-          <p className="mt-2 text-xs text-neutral-400">
+          <p className="mt-2 text-xs text-slate-400">
             Compartilhe este endereço com seus operadores — cada um entra com o próprio PIN.
           </p>
         </div>

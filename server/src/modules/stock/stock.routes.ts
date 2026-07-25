@@ -25,7 +25,7 @@ export const stockRouter = Router();
 stockRouter.get('/movements', async (req, res) => {
   const { productId, type, from, to } = req.query;
   res.json(
-    await service.listMovements(req.auth!.tenantId, {
+    await service.listMovements(req.auth!.tenantId!, {
       productId: productId ? Number(productId) : undefined,
       type: typeof type === 'string' ? type : undefined,
       from: typeof from === 'string' ? from : undefined,
@@ -34,8 +34,8 @@ stockRouter.get('/movements', async (req, res) => {
   );
 });
 
-stockRouter.post('/movements', requireRole('gerente', 'admin'), validateBody(movementSchema), async (req, res) => {
+stockRouter.post('/movements', requireRole('GERENTE', 'ADMIN_LOJA'), validateBody(movementSchema), async (req, res) => {
   res
     .status(201)
-    .json(await service.registerManualMovement(req.auth!.tenantId, req.body, req.auth!.userId));
+    .json(await service.registerManualMovement(req.auth!.tenantId!, req.body, req.auth!.userId));
 });

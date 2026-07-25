@@ -15,6 +15,9 @@ interface SettingsRow {
   catalog_logo_url: string | null;
   catalog_banner_url: string | null;
   city_text: string | null;
+  delivery_zone_mode: string;
+  fiado_due_days: number;
+  free_delivery_above_cents: number;
 }
 
 const DEFAULTS: StoreSettings = {
@@ -30,6 +33,9 @@ const DEFAULTS: StoreSettings = {
   catalogLogoUrl: null,
   catalogBannerUrl: null,
   cityText: null,
+  deliveryZoneMode: 'off',
+  fiadoDueDays: 30,
+  freeDeliveryAboveCents: 0,
 };
 
 function mapRow(row: SettingsRow): StoreSettings {
@@ -46,6 +52,9 @@ function mapRow(row: SettingsRow): StoreSettings {
     catalogLogoUrl: row.catalog_logo_url ?? null,
     catalogBannerUrl: row.catalog_banner_url ?? null,
     cityText: row.city_text ?? null,
+    deliveryZoneMode: row.delivery_zone_mode as StoreSettings['deliveryZoneMode'],
+    fiadoDueDays: row.fiado_due_days,
+    freeDeliveryAboveCents: row.free_delivery_above_cents,
   };
 }
 
@@ -69,8 +78,9 @@ export function updateSettings(
       `INSERT INTO store_settings
         (catalog_enabled, delivery_enabled, pickup_enabled, delivery_fee_cents, min_order_cents,
          pending_ttl_minutes, whatsapp, address_text, opening_hours_text,
-         catalog_logo_url, catalog_banner_url, city_text)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         catalog_logo_url, catalog_banner_url, city_text, delivery_zone_mode, fiado_due_days,
+         free_delivery_above_cents)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        ON CONFLICT (tenant_id) DO UPDATE SET
          catalog_enabled = EXCLUDED.catalog_enabled,
          delivery_enabled = EXCLUDED.delivery_enabled,
@@ -84,6 +94,9 @@ export function updateSettings(
          catalog_logo_url = EXCLUDED.catalog_logo_url,
          catalog_banner_url = EXCLUDED.catalog_banner_url,
          city_text = EXCLUDED.city_text,
+         delivery_zone_mode = EXCLUDED.delivery_zone_mode,
+         fiado_due_days = EXCLUDED.fiado_due_days,
+         free_delivery_above_cents = EXCLUDED.free_delivery_above_cents,
          updated_at = now()
        RETURNING *`,
       [
@@ -99,6 +112,9 @@ export function updateSettings(
         next.catalogLogoUrl,
         next.catalogBannerUrl,
         next.cityText,
+        next.deliveryZoneMode,
+        next.fiadoDueDays,
+        next.freeDeliveryAboveCents,
       ]
     );
     return mapRow(rows[0]);

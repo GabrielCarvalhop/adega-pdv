@@ -5,9 +5,33 @@ import { AppError } from '../../middlewares/errorHandler';
 import { logAction } from '../audit/audit.service';
 import * as cashRepo from '../cash/cash.repository';
 import * as customersRepo from '../customers/customers.repository';
+import * as ledgerRepo from '../customers/ledger.repository';
+import type { UserRole } from '@adega/shared';
+import * as paymentMethodsRepo from '../paymentMethods/paymentMethods.repository';
 import * as productsRepo from '../products/products.repository';
-import * as stockRepo from '../stock/stock.repository';
+import * as discountsRepo from '../products/quantityDiscounts.repository';
+import * as settingsService from '../settings/settings.service';
+import * as stockComposition from '../stock/stockComposition.service';
+import * as surchargeRulesRepo from '../surchargeRules/surchargeRules.repository';
+import * as usersRepo from '../users/users.repository';
 import * as repo from './sales.repository';
+
+/** Vencimento de uma venda fiada = hoje + prazo padrão configurado na loja. */
+export async function computeFiadoDueDate(client: PoolClient): Promise<string> {
+  const settings = await settingsService.loadSettings(client);
+  const due = new Date();
+  due.setDate(due.getDate() + settings.fiadoDueDays);
+  return due.toISOString().slice(0, 10);
+}
+
+// Fase 3: teto de desconto manual quando o usuário não tem um valor próprio
+// configurado (User.maxDiscountPercent nulo). Admin sem teto (null = ilimitado).
+const DEFAULT_MAX_DISCOUNT_PERCENT: Record<UserRole, number | null> = {
+  FUNCIONARIO: 10,
+  GERENTE: 50,
+  ADMIN_LOJA: null,
+  SUPER_ADMIN: null,
+};
 
 export function listSales(tenantId: number, filters: repo.SaleFilters) {
   return withTenantTransaction(tenantId, (client) => repo.listSales(client, filters));
@@ -52,39 +76,115 @@ export function completeSale(tenantId: number, input: CreateSaleRequest, userId:
       if (!customer) throw new AppError('Cliente não encontrado', 404);
     }
 
+    const actingUser = userId !== null ? await usersRepo.findById(client, userId) : undefined;
+    const allowNegativeStock = actingUser?.canSellWithoutStock ?? false;
+
     const products = [];
     for (const item of input.items) {
       const product = await productsRepo.findById(client, item.productId);
       if (!product) throw new AppError(`Produto #${item.productId} não encontrado`, 404);
       if (!product.active) throw new AppError(`Produto "${product.name}" está inativo`);
       if (item.quantity <= 0) throw new AppError('Quantidade deve ser positiva');
-      if (product.stockQuantity < item.quantity) {
+      // Combo não usa o próprio stock_quantity — a baixa acontece nos combo_items.
+      if (!product.isCombo && !allowNegativeStock && product.stockQuantity < item.quantity) {
         throw new AppError(
           `Estoque insuficiente para "${product.name}" (disponível: ${product.stockQuantity})`
         );
       }
-      products.push({ item, product });
+      const { resolved: addons, extraPriceCentsTotal } = await stockComposition.resolveAddonSelections(
+        client,
+        product.id,
+        item.addons
+      );
+      products.push({ item, product, addons, extraPriceCentsTotal });
     }
 
     let subtotalCents = 0;
-    const itemsToInsert = products.map(({ item, product }) => {
-      const itemDiscount = item.discountCents ?? 0;
-      const totalCents = item.unitPriceCents * item.quantity - itemDiscount;
+    const itemsToInsert = [];
+    for (const { item, product, addons, extraPriceCentsTotal } of products) {
+      // Desconto manual do operador tem prioridade; sem ele, aplica a melhor
+      // faixa de quantidade vigente automaticamente.
+      let itemDiscount = item.discountCents ?? 0;
+      if (itemDiscount === 0) {
+        const tier = await discountsRepo.findBestTier(client, product.id, item.quantity);
+        if (tier) {
+          itemDiscount = discountsRepo.computeDiscountCents(tier, item.quantity, item.unitPriceCents);
+        }
+      }
+      const unitPriceCents = item.unitPriceCents + extraPriceCentsTotal;
+      const totalCents = unitPriceCents * item.quantity - itemDiscount;
       subtotalCents += totalCents;
-      return {
+      itemsToInsert.push({
         productId: product.id,
         productNameSnapshot: product.name,
         quantity: item.quantity,
-        unitPriceCents: item.unitPriceCents,
+        unitPriceCents,
         unitCostCents: product.costPriceCents,
         discountCents: itemDiscount,
         totalCents,
-      };
-    });
+        isCombo: product.isCombo,
+        addons,
+        notes: item.notes?.trim() || null,
+      });
+    }
 
     const discountCents = input.discountCents ?? 0;
-    const totalCents = subtotalCents - discountCents;
-    if (totalCents < 0) throw new AppError('Desconto maior que o total da venda');
+    const baseTotalCents = subtotalCents - discountCents;
+    if (baseTotalCents < 0) throw new AppError('Desconto maior que o total da venda');
+
+    if (discountCents > 0 && subtotalCents > 0) {
+      const maxDiscountPercent =
+        actingUser?.maxDiscountPercent ?? DEFAULT_MAX_DISCOUNT_PERCENT[actingUser?.role ?? 'FUNCIONARIO'];
+      if (maxDiscountPercent !== null) {
+        const discountPercent = (discountCents / subtotalCents) * 100;
+        if (discountPercent > maxDiscountPercent + 0.01) {
+          throw new AppError(
+            `Desconto de ${discountPercent.toFixed(1)}% excede seu limite de ${maxDiscountPercent}%`,
+            403
+          );
+        }
+      }
+    }
+
+    const methods = await paymentMethodsRepo.listAll(client);
+    const methodsById = new Map(methods.map((m) => [m.id, m]));
+    let hasFiado = false;
+    let hasCreditsAccount = false;
+    for (const payment of input.payments) {
+      const method = methodsById.get(payment.paymentMethodId);
+      if (!method || !method.active) {
+        throw new AppError('Meio de pagamento inválido ou inativo', 400);
+      }
+      if (method.allowsChange && payment.amountReceivedCents !== undefined) {
+        if (payment.amountReceivedCents < payment.amountCents) {
+          throw new AppError('Valor recebido é menor que o valor a pagar nesse método');
+        }
+      }
+      if (method.kind === 'fiado') hasFiado = true;
+      if (method.creditsAccount) hasCreditsAccount = true;
+    }
+    if (hasFiado && input.customerId === undefined) {
+      throw new AppError('Selecione o cliente para vender fiado');
+    }
+    if (hasCreditsAccount && input.customerId === undefined) {
+      throw new AppError('Selecione o cliente para creditar em conta');
+    }
+
+    // Acréscimo automático no atacado: só quando todos os pagamentos usam
+    // meios com a MESMA regra ativa — evita cálculo ambíguo em split payment
+    // com métodos de taxas diferentes.
+    const saleType = input.saleType ?? 'varejo';
+    let surchargeCents = 0;
+    if (saleType === 'atacado') {
+      const rules = await surchargeRulesRepo.activePercentsByType(client, 'atacado');
+      const percents = input.payments.map((p) => rules.get(p.paymentMethodId) ?? 0);
+      const uniquePercents = new Set(percents.filter((p) => p > 0));
+      if (uniquePercents.size === 1) {
+        const [percent] = uniquePercents;
+        surchargeCents = Math.round((baseTotalCents * percent) / 100);
+      }
+    }
+    const totalCents = baseTotalCents + surchargeCents;
 
     const paymentsTotal = input.payments.reduce((sum, p) => sum + p.amountCents, 0);
     if (paymentsTotal !== totalCents) {
@@ -93,17 +193,11 @@ export function completeSale(tenantId: number, input: CreateSaleRequest, userId:
       );
     }
 
-    for (const payment of input.payments) {
-      if (payment.method === 'dinheiro' && payment.amountReceivedCents !== undefined) {
-        if (payment.amountReceivedCents < payment.amountCents) {
-          throw new AppError('Valor recebido em dinheiro é menor que o valor a pagar nesse método');
-        }
-      }
-    }
-
     const saleId = await repo.insertSale(client, {
+      saleType,
       subtotalCents,
       discountCents,
+      surchargeCents,
       totalCents,
       cashSessionId: cashSession.id,
       userId,
@@ -112,33 +206,74 @@ export function completeSale(tenantId: number, input: CreateSaleRequest, userId:
     });
 
     for (const itemInput of itemsToInsert) {
-      await repo.insertSaleItem(client, { saleId, ...itemInput });
-      const adj = await productsRepo.adjustStockQuantity(client, itemInput.productId, -itemInput.quantity);
-      await stockRepo.insertMovement(client, {
-        productId: itemInput.productId,
-        type: 'venda',
-        quantity: itemInput.quantity,
-        prevQuantity: adj.prevQuantity,
-        nextQuantity: adj.nextQuantity,
-        reason: null,
-        unitCostCents: itemInput.unitCostCents,
+      const itemId = await repo.insertSaleItem(client, {
         saleId,
-        idempotencyKey: `sale:${saleId}:${itemInput.productId}`,
+        productId: itemInput.productId,
+        productNameSnapshot: itemInput.productNameSnapshot,
+        quantity: itemInput.quantity,
+        unitPriceCents: itemInput.unitPriceCents,
+        unitCostCents: itemInput.unitCostCents,
+        discountCents: itemInput.discountCents,
+        totalCents: itemInput.totalCents,
+        notes: itemInput.notes,
+      });
+      for (const addon of itemInput.addons) {
+        await repo.insertItemAddon(client, { saleItemId: itemId, ...addon });
+      }
+      await stockComposition.applyItemStock(client, {
+        productId: itemInput.productId,
+        isCombo: itemInput.isCombo,
+        quantity: itemInput.quantity,
+        sign: -1,
+        addons: itemInput.addons,
+        movementType: 'venda',
+        reason: null,
+        saleId,
+        idempotencyPrefix: `sale:${saleId}:${itemInput.productId}`,
         userId,
+        unitCostCents: itemInput.unitCostCents,
+        allowNegative: allowNegativeStock,
       });
     }
 
+    const fiadoDueDate = hasFiado ? await computeFiadoDueDate(client) : null;
+
     for (const payment of input.payments) {
-      const amountReceivedCents =
-        payment.method === 'dinheiro' ? payment.amountReceivedCents ?? payment.amountCents : null;
+      const method = methodsById.get(payment.paymentMethodId)!;
+      const amountReceivedCents = method.allowsChange
+        ? payment.amountReceivedCents ?? payment.amountCents
+        : null;
       const changeCents = amountReceivedCents !== null ? amountReceivedCents - payment.amountCents : 0;
+      const netAmountCents = Math.round(payment.amountCents * (1 - method.retentionPercent / 100));
       await repo.insertPayment(client, {
         saleId,
-        method: payment.method,
+        paymentMethodId: payment.paymentMethodId,
         amountCents: payment.amountCents,
         amountReceivedCents,
         changeCents,
+        netAmountCents,
       });
+      if (method.kind === 'fiado') {
+        await ledgerRepo.addEntry(client, {
+          customerId: input.customerId!,
+          type: 'fiado_venda',
+          amountCents: -payment.amountCents,
+          saleId,
+          dueDate: fiadoDueDate,
+          notes: `Venda #${saleId}`,
+          userId,
+        });
+      }
+      if (method.creditsAccount) {
+        await ledgerRepo.addEntry(client, {
+          customerId: input.customerId!,
+          type: 'credito_adicionado',
+          amountCents: payment.amountCents,
+          saleId,
+          notes: `Venda #${saleId}`,
+          userId,
+        });
+      }
     }
 
     if (discountCents > 0) {
@@ -163,18 +298,19 @@ export function cancelSale(tenantId: number, id: number, reason: string, userId:
     const items = (await repo.findItemsBySale(client, id)).filter((i) => !i.canceled);
 
     for (const item of items) {
-      const adj = await productsRepo.adjustStockQuantity(client, item.productId, item.quantity);
-      await stockRepo.insertMovement(client, {
+      const product = await productsRepo.findById(client, item.productId);
+      await stockComposition.applyItemStock(client, {
         productId: item.productId,
-        type: 'cancelamento_venda',
+        isCombo: product?.isCombo ?? false,
         quantity: item.quantity,
-        prevQuantity: adj.prevQuantity,
-        nextQuantity: adj.nextQuantity,
+        sign: 1,
+        addons: item.addons,
+        movementType: 'cancelamento_venda',
         reason: `Cancelamento da venda #${id}: ${reason.trim()}`,
-        unitCostCents: item.unitCostCents,
         saleId: id,
-        idempotencyKey: `sale-cancel:${id}:${item.id}`,
+        idempotencyPrefix: `sale-cancel:${id}:${item.id}`,
         userId,
+        unitCostCents: item.unitCostCents,
       });
     }
     await repo.markAllItemsCanceled(client, id);
@@ -207,18 +343,19 @@ export function cancelSaleItem(
     if (!item) throw new AppError('Item não encontrado', 404);
     if (item.canceled) throw new AppError('Este item já está cancelado');
 
-    const adj = await productsRepo.adjustStockQuantity(client, item.productId, item.quantity);
-    await stockRepo.insertMovement(client, {
+    const product = await productsRepo.findById(client, item.productId);
+    await stockComposition.applyItemStock(client, {
       productId: item.productId,
-      type: 'cancelamento_venda',
+      isCombo: product?.isCombo ?? false,
       quantity: item.quantity,
-      prevQuantity: adj.prevQuantity,
-      nextQuantity: adj.nextQuantity,
+      sign: 1,
+      addons: item.addons,
+      movementType: 'cancelamento_venda',
       reason: `Cancelamento do item #${itemId} da venda #${saleId}: ${reason.trim()}`,
-      unitCostCents: item.unitCostCents,
       saleId,
-      idempotencyKey: `sale-item-cancel:${itemId}`,
+      idempotencyPrefix: `sale-item-cancel:${itemId}`,
       userId,
+      unitCostCents: item.unitCostCents,
     });
     await repo.markItemCanceled(client, itemId);
 

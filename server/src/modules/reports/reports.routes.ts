@@ -6,7 +6,7 @@ import type { GroupBy } from './reports.repository';
 
 export const reportsRouter = Router();
 
-reportsRouter.use(requireRole('gerente', 'admin'));
+reportsRouter.use(requireRole('GERENTE', 'ADMIN_LOJA'));
 
 function parseRange(req: import('express').Request) {
   const { from, to } = req.query;
@@ -19,30 +19,42 @@ function parseRange(req: import('express').Request) {
 reportsRouter.get('/sales', async (req, res) => {
   const range = parseRange(req);
   const groupBy = (req.query.groupBy as string) || 'day';
-  if (!['day', 'week', 'month'].includes(groupBy)) {
-    throw new AppError('groupBy inválido — use day, week ou month');
+  if (!['hour', 'day', 'week', 'month'].includes(groupBy)) {
+    throw new AppError('groupBy inválido — use hour, day, week ou month');
   }
-  res.json(await service.getSalesByPeriod(req.auth!.tenantId, range, groupBy as GroupBy));
+  res.json(await service.getSalesByPeriod(req.auth!.tenantId!, range, groupBy as GroupBy));
 });
 
 reportsRouter.get('/top-products', async (req, res) => {
   const range = parseRange(req);
   const limit = req.query.limit ? Number(req.query.limit) : 10;
-  res.json(await service.getTopProducts(req.auth!.tenantId, range, limit));
+  res.json(await service.getTopProducts(req.auth!.tenantId!, range, limit));
 });
 
 reportsRouter.get('/margin', async (req, res) => {
   const range = parseRange(req);
-  res.json(await service.getMargin(req.auth!.tenantId, range));
+  res.json(await service.getMargin(req.auth!.tenantId!, range));
 });
 
 reportsRouter.get('/cash-history', async (req, res) => {
   const range = parseRange(req);
-  res.json(await service.getCashHistory(req.auth!.tenantId, range.from, range.to));
+  res.json(await service.getCashHistory(req.auth!.tenantId!, range.from, range.to));
 });
 
 reportsRouter.get('/daily-consolidated', async (req, res) => {
   const date = typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new AppError('Data inválida (use YYYY-MM-DD)');
-  res.json(await service.getDailyConsolidated(req.auth!.tenantId, date));
+  res.json(await service.getDailyConsolidated(req.auth!.tenantId!, date));
+});
+
+reportsRouter.get('/reconciliation', async (req, res) => {
+  const range = parseRange(req);
+  const { cashSessionId, paymentMethodId } = req.query;
+  res.json(
+    await service.getReconciliation(req.auth!.tenantId!, {
+      ...range,
+      cashSessionId: typeof cashSessionId === 'string' ? Number(cashSessionId) : undefined,
+      paymentMethodId: typeof paymentMethodId === 'string' ? Number(paymentMethodId) : undefined,
+    })
+  );
 });

@@ -1,6 +1,5 @@
-import type { User } from '@adega/shared';
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
-import { authApi } from '../api/auth.api';
+import { authApi, type SessionUser } from '../api/auth.api';
 import { getToken, setToken, setUnauthorizedHandler } from '../api/client';
 
 const SLUG_KEY = 'adega_slug';
@@ -10,16 +9,20 @@ export function getSavedSlug(): string | null {
 }
 
 interface AuthContextValue {
-  user: User | null;
+  user: SessionUser | null;
   loading: boolean;
   login: (slug: string, userId: number, pin: string) => Promise<void>;
+  superAdminLogin: (email: string, password: string) => Promise<void>;
+  /** Troca o token por um escopado à loja (SUPER_ADMIN "entrando" numa loja). */
+  applyToken: (token: string) => Promise<void>;
   logout: () => void;
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,10 +41,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(slug: string, userId: number, pin: string) {
-    const { token, user: loggedUser } = await authApi.login(slug, userId, pin);
+    const { token } = await authApi.login(slug, userId, pin);
     setToken(token);
     localStorage.setItem(SLUG_KEY, slug);
-    setUser(loggedUser);
+    // Busca de novo via /me para incluir storeName (não vem no retorno do login).
+    setUser(await authApi.me());
+  }
+
+  async function superAdminLogin(email: string, password: string) {
+    const { token } = await authApi.superAdminLogin({ email, password });
+    setToken(token);
+    localStorage.removeItem(SLUG_KEY);
+    setUser(await authApi.me());
+  }
+
+  async function applyToken(token: string) {
+    setToken(token);
+    setUser(await authApi.me());
   }
 
   function logout() {
@@ -50,7 +66,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
-  return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;
+  async function refresh() {
+    setUser(await authApi.me());
+  }
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, superAdminLogin, applyToken, logout, refresh }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

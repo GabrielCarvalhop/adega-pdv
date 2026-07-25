@@ -28,12 +28,38 @@ async function ensureAppRole(client: import('pg').PoolClient) {
   );
   await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_DB_ROLE}`);
 
-  // Trilha de auditoria é imutável para a aplicação: só INSERT/SELECT.
-  const auditTable = await client.query(
-    "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'audit_logs'"
-  );
-  if (auditTable.rows.length > 0) {
-    await client.query(`REVOKE UPDATE, DELETE ON audit_logs FROM ${APP_DB_ROLE}`);
+  // Tabelas imutáveis para a aplicação: só INSERT/SELECT. Correções são
+  // sempre um novo registro (ex.: lançamento 'ajuste'), nunca edição.
+  for (const table of ['audit_logs', 'customer_ledger_entries']) {
+    const exists = await client.query(
+      'SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2',
+      ['public', table]
+    );
+    if (exists.rows.length > 0) {
+      await client.query(`REVOKE UPDATE, DELETE ON ${table} FROM ${APP_DB_ROLE}`);
+    }
+  }
+
+  // Tabelas de sistema (sem tenant_id): no Supabase a Data API (PostgREST)
+  // expõe o schema public, então elas ficam com RLS habilitada e SEM policy
+  // pública — invisíveis para anon/authenticated. A app (adega_app) acessa
+  // via policy explícita de acesso total, criada aqui de forma idempotente.
+  for (const table of ['tenants', 'account_owners', 'subscriptions', 'billing_events']) {
+    const exists = await client.query(
+      'SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2',
+      ['public', table]
+    );
+    if (exists.rows.length === 0) continue;
+    await client.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+    const policy = await client.query(
+      'SELECT 1 FROM pg_policies WHERE schemaname = $1 AND tablename = $2 AND policyname = $3',
+      ['public', table, 'app_full_access']
+    );
+    if (policy.rows.length === 0) {
+      await client.query(
+        `CREATE POLICY app_full_access ON ${table} FOR ALL TO ${APP_DB_ROLE} USING (true) WITH CHECK (true)`
+      );
+    }
   }
 }
 
@@ -90,3 +116,4 @@ if (require.main === module) {
       process.exit(1);
     });
 }
+

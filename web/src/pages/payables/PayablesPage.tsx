@@ -45,41 +45,41 @@ function NewPayableModal({ onClose }: { onClose: () => void }) {
     <Modal title="Nova conta a pagar" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Descrição</label>
+          <label className="block text-sm font-medium text-slate-500">Descrição</label>
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             autoFocus
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-neutral-700">Categoria</label>
+            <label className="block text-sm font-medium text-slate-500">Categoria</label>
             <input
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               placeholder="Ex: Fixo, Fornecedor"
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-700">Valor (R$)</label>
+            <label className="block text-sm font-medium text-slate-500">Valor (R$)</label>
             <input
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0,00"
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             />
           </div>
         </div>
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Vencimento</label>
+          <label className="block text-sm font-medium text-slate-500">Vencimento</label>
           <input
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
           />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -123,8 +123,7 @@ export function PayablesPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-neutral-800">Contas a pagar</h1>
+      <div className="mb-6 flex items-center justify-end">
         <Button onClick={() => setShowNew(true)}>+ Nova conta</Button>
       </div>
 
@@ -134,8 +133,8 @@ export function PayablesPage() {
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                filter === f ? 'bg-blue-100 text-blue-700' : 'text-neutral-600 hover:bg-neutral-100'
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                filter === f ? 'bg-amber-100 text-amber-700' : 'text-slate-500 hover:bg-gray-100'
               }`}
             >
               {f === 'pending' ? 'Pendentes' : f === 'paid' ? 'Pagas' : 'Todas'}
@@ -143,18 +142,18 @@ export function PayablesPage() {
           ))}
         </div>
         {filter !== 'paid' && (
-          <p className="text-sm text-neutral-500">
-            Total pendente: <span className="font-semibold text-neutral-800">{formatBRL(totalPending)}</span>
+          <p className="text-sm text-slate-500">
+            Total pendente: <span className="font-semibold text-gray-900">{formatBRL(totalPending)}</span>
           </p>
         )}
       </div>
 
-      {isLoading && <p className="text-neutral-500">Carregando...</p>}
+      {isLoading && <p className="text-slate-500">Carregando...</p>}
 
       {!isLoading && (
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-neutral-200 text-left text-neutral-500">
+            <tr className="border-b border-gray-300 text-left text-slate-500">
               <th className="py-2">Descrição</th>
               <th className="py-2">Categoria</th>
               <th className="py-2">Vencimento</th>
@@ -165,9 +164,9 @@ export function PayablesPage() {
           </thead>
           <tbody>
             {payables?.map((p) => (
-              <tr key={p.id} className="border-b border-neutral-100">
-                <td className="py-2 font-medium text-neutral-800">{p.description}</td>
-                <td className="py-2 text-neutral-500">{p.category ?? '—'}</td>
+              <tr key={p.id} className="border-b border-gray-200">
+                <td className="py-2 font-medium text-gray-900">{p.description}</td>
+                <td className="py-2 text-slate-500">{p.category ?? '—'}</td>
                 <td className={`py-2 ${isOverdue(p) ? 'font-semibold text-red-600' : ''}`}>
                   {new Date(p.dueDate + 'T00:00:00').toLocaleDateString('pt-BR')}
                   {isOverdue(p) && ' ⚠'}
@@ -185,7 +184,7 @@ export function PayablesPage() {
                 <td className="py-2 text-right">
                   <button
                     onClick={() => payMutation.mutate({ id: p.id, paid: !p.paid })}
-                    className="mr-3 text-blue-600 hover:underline"
+                    className="mr-3 text-amber-600 hover:underline"
                   >
                     {p.paid ? 'Reabrir' : 'Marcar paga'}
                   </button>
@@ -202,7 +201,7 @@ export function PayablesPage() {
             ))}
             {payables?.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-6 text-center text-neutral-400">
+                <td colSpan={6} className="py-6 text-center text-slate-400">
                   Nenhuma conta encontrada.
                 </td>
               </tr>

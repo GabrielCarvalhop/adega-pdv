@@ -1,15 +1,32 @@
 import type {
+  CashSession,
   CashSessionSummary,
   CloseCashSessionRequest,
   CreateCashMovementRequest,
   OpenCashSessionRequest,
   PaymentBreakdown,
+  UserRole,
 } from '@adega/shared';
 import type { PoolClient } from 'pg';
 import { withTenantTransaction } from '../../db/connection';
 import { AppError } from '../../middlewares/errorHandler';
 import { logAction } from '../audit/audit.service';
+import * as paymentMethodsRepo from '../paymentMethods/paymentMethods.repository';
 import * as repo from './cash.repository';
+
+export interface ActingUser {
+  userId: number | null;
+  role: UserRole;
+}
+
+/** Um funcionário só pode agir no próprio caixa; gerente/admin podem agir em
+ * qualquer caixa da loja (ex.: funcionário esqueceu de fechar e foi embora). */
+function assertCanAct(session: CashSession, auth: ActingUser) {
+  if (auth.role !== 'FUNCIONARIO') return;
+  if (session.openedByUserId !== auth.userId) {
+    throw new AppError('Este caixa foi aberto por outro operador', 403);
+  }
+}
 
 export function getOpenSessions(tenantId: number) {
   return withTenantTransaction(tenantId, (client) => repo.listOpenSessions(client));
@@ -31,10 +48,6 @@ export function getMovements(tenantId: number, sessionId: number) {
   return withTenantTransaction(tenantId, (client) => repo.listMovements(client, sessionId));
 }
 
-function emptyBreakdown(): PaymentBreakdown {
-  return { dinheiro: 0, debito: 0, credito: 0, pix: 0 };
-}
-
 /** Resumo do caixa para conferência no fechamento: quebra por forma de pagamento,
  * suprimentos, sangrias e cancelamentos da sessão. */
 export function getSummary(tenantId: number, sessionId: number): Promise<CashSessionSummary> {
@@ -42,13 +55,11 @@ export function getSummary(tenantId: number, sessionId: number): Promise<CashSes
     const session = await repo.findById(client, sessionId);
     if (!session) throw new AppError('Sessão de caixa não encontrada', 404);
 
+    const methods = await paymentMethodsRepo.listActive(client);
     const breakdownRows = await repo.paymentBreakdown(client, sessionId);
-    const paymentBreakdown = emptyBreakdown();
-    for (const row of breakdownRows) {
-      if (row.method in paymentBreakdown) {
-        paymentBreakdown[row.method as keyof PaymentBreakdown] = row.total;
-      }
-    }
+    const paymentBreakdown: PaymentBreakdown = {};
+    for (const m of methods) paymentBreakdown[m.code] = 0;
+    for (const row of breakdownRows) paymentBreakdown[row.method] = row.total;
 
     const agg = await repo.sessionSalesAgg(client, sessionId);
     return {
@@ -56,6 +67,7 @@ export function getSummary(tenantId: number, sessionId: number): Promise<CashSes
       salesCount: agg.salesCount,
       salesTotalCents: agg.salesTotalCents,
       paymentBreakdown,
+      paymentMethods: methods,
       suprimentosCents: await repo.sumMovements(client, sessionId, 'suprimento'),
       sangriasCents: await repo.sumMovements(client, sessionId, 'sangria'),
       canceledCount: agg.canceledCount,
@@ -90,11 +102,14 @@ export function addMovement(
   tenantId: number,
   sessionId: number,
   data: CreateCashMovementRequest,
-  userId: number | null
+  auth: ActingUser
 ) {
   return withTenantTransaction(tenantId, async (client) => {
-    const session = await repo.findById(client, sessionId);
+    // Trava a linha da sessão: serializa sangrias/suprimentos concorrentes no
+    // mesmo caixa para que o saldo esperado lido abaixo esteja sempre atualizado.
+    const session = await repo.lockById(client, sessionId);
     if (!session) throw new AppError('Sessão de caixa não encontrada', 404);
+    assertCanAct(session, auth);
     if (session.status !== 'aberto') throw new AppError('Este caixa já está fechado');
     if (data.amountCents <= 0) throw new AppError('Valor deve ser positivo');
     if (!data.reason.trim()) throw new AppError('Motivo é obrigatório');
@@ -112,12 +127,13 @@ export function addMovement(
       data.type,
       data.amountCents,
       data.reason.trim(),
-      userId
+      auth.userId
     );
-    await logAction(client, userId, `caixa.${data.type}`, 'cash_movement', movement.id, {
+    await logAction(client, auth.userId, `caixa.${data.type}`, 'cash_movement', movement.id, {
       cashSessionId: sessionId,
       amountCents: data.amountCents,
       reason: data.reason.trim(),
+      ...(session.openedByUserId !== auth.userId ? { actingOnOtherOperator: true } : {}),
     });
     return movement;
   });
@@ -146,11 +162,14 @@ export function close(
   tenantId: number,
   sessionId: number,
   data: CloseCashSessionRequest,
-  userId: number | null
+  auth: ActingUser
 ) {
   return withTenantTransaction(tenantId, async (client) => {
-    const session = await repo.findById(client, sessionId);
+    // Trava a linha da sessão: serializa contra sangrias/suprimentos e contra
+    // outro fechamento concorrente do mesmo caixa (ver closeSession abaixo).
+    const session = await repo.lockById(client, sessionId);
     if (!session) throw new AppError('Sessão de caixa não encontrada', 404);
+    assertCanAct(session, auth);
     if (session.status !== 'aberto') throw new AppError('Este caixa já está fechado');
     if (data.countedAmountCents < 0) throw new AppError('Valor contado inválido');
 
@@ -168,13 +187,16 @@ export function close(
       data.countedAmountCents,
       difference,
       data.notes?.trim() ?? null,
-      userId
+      auth.userId
     );
-    await logAction(client, userId, 'caixa.fechamento', 'cash_session', sessionId, {
+    // WHERE status = 'aberto' no UPDATE: 0 linhas = outra chamada fechou primeiro.
+    if (!closed) throw new AppError('Este caixa já foi fechado por outra operação', 409);
+    await logAction(client, auth.userId, 'caixa.fechamento', 'cash_session', sessionId, {
       registerLabel: closed.registerLabel,
       expectedAmountCents: expected,
       countedAmountCents: data.countedAmountCents,
       differenceCents: difference,
+      ...(session.openedByUserId !== auth.userId ? { actingOnOtherOperator: true } : {}),
     });
     return closed;
   });

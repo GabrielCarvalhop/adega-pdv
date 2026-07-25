@@ -42,7 +42,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`/api${path}`, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { ...options, headers });
+  } catch {
+    // fetch rejeita (TypeError) em falha de rede/DNS/servidor fora do ar —
+    // sistema é 100% online, então falha fechado com mensagem clara em vez
+    // de deixar o operador achar que a ação foi concluída. status 0 permite
+    // distinguir de erros HTTP reais se algum chamador precisar.
+    throw new ApiError('Sem conexão com o servidor — verifique sua internet e tente novamente', 0);
+  }
 
   if (res.status === 401 && path !== '/auth/login') {
     setToken(null);

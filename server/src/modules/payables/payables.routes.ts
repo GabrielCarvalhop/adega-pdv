@@ -22,11 +22,11 @@ const setPaidSchema = z.object({
 
 export const payablesRouter = Router();
 
-payablesRouter.use(requireRole('gerente', 'admin'));
+payablesRouter.use(requireRole('GERENTE', 'ADMIN_LOJA'));
 
 payablesRouter.get('/', async (req, res) => {
   const { paid, from, to } = req.query;
-  const payables = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const payables = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.findAll(client, {
       paid: paid === undefined ? undefined : paid === 'true',
       from: typeof from === 'string' ? from : undefined,
@@ -37,7 +37,7 @@ payablesRouter.get('/', async (req, res) => {
 });
 
 payablesRouter.post('/', validateBody(createSchema), async (req, res) => {
-  const payable = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const payable = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.create(client, req.body)
   );
   res.status(201).json(payable);
@@ -46,7 +46,7 @@ payablesRouter.post('/', validateBody(createSchema), async (req, res) => {
 payablesRouter.put('/:id', validateBody(updateSchema), async (req, res) => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) throw new AppError('ID inválido');
-  const updated = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const updated = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.update(client, id, req.body)
   );
   if (!updated) throw new AppError('Conta não encontrada', 404);
@@ -56,7 +56,7 @@ payablesRouter.put('/:id', validateBody(updateSchema), async (req, res) => {
 payablesRouter.post('/:id/pay', validateBody(setPaidSchema), async (req, res) => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) throw new AppError('ID inválido');
-  const updated = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const updated = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.setPaid(client, id, req.body.paid)
   );
   if (!updated) throw new AppError('Conta não encontrada', 404);
@@ -66,6 +66,6 @@ payablesRouter.post('/:id/pay', validateBody(setPaidSchema), async (req, res) =>
 payablesRouter.delete('/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) throw new AppError('ID inválido');
-  await withTenantTransaction(req.auth!.tenantId, (client) => repo.remove(client, id));
+  await withTenantTransaction(req.auth!.tenantId!, (client) => repo.remove(client, id));
   res.status(204).end();
 });

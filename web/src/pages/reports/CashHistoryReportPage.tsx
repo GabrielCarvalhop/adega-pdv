@@ -20,6 +20,8 @@ export function CashHistoryReportPage() {
     queryFn: () => reportsApi.cashHistory({ from: from || undefined, to: to || undefined }),
   });
 
+  const canReopen = user?.role === 'GERENTE' || user?.role === 'ADMIN_LOJA';
+
   const reopen = useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) => cashApi.reopen(id, reason),
     onSuccess: () => {
@@ -31,24 +33,24 @@ export function CashHistoryReportPage() {
 
   return (
     <div className="p-8">
-      <h1 className="mb-6 text-2xl font-bold text-neutral-800">Relatórios</h1>
       <ReportsNav />
 
       <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
 
-      {isLoading && <p className="mt-4 text-neutral-500">Carregando...</p>}
+      {isLoading && <p className="mt-4 text-slate-500">Carregando...</p>}
 
       {!isLoading && (
         <table className="mt-4 w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-neutral-200 text-left text-neutral-500">
+            <tr className="border-b border-gray-300 text-left text-slate-500">
               <th className="py-2">Abertura</th>
+              <th className="py-2">Operador</th>
               <th className="py-2">Fechamento</th>
               <th className="py-2">Status</th>
               <th className="py-2">Esperado</th>
               <th className="py-2">Contado</th>
               <th className="py-2">Diferença</th>
-              {user?.role === 'admin' && <th className="py-2"></th>}
+              {canReopen && <th className="py-2"></th>}
             </tr>
           </thead>
           <tbody>
@@ -56,8 +58,9 @@ export function CashHistoryReportPage() {
               const diff = session.differenceCents ?? 0;
               const isLarge = Math.abs(diff) >= LARGE_DIFFERENCE_CENTS;
               return (
-                <tr key={session.id} className="border-b border-neutral-100">
+                <tr key={session.id} className="border-b border-gray-200">
                   <td className="py-2">{new Date(session.openedAt).toLocaleString('pt-BR')}</td>
+                  <td className="py-2">{session.openedByUserName ?? '—'}</td>
                   <td className="py-2">
                     {session.closedAt ? new Date(session.closedAt).toLocaleString('pt-BR') : '—'}
                   </td>
@@ -72,7 +75,7 @@ export function CashHistoryReportPage() {
                     {session.differenceCents !== null ? formatBRL(session.differenceCents) : '—'}
                     {isLarge && ' ⚠'}
                   </td>
-                  {user?.role === 'admin' && (
+                  {canReopen && (
                     <td className="py-2 text-right">
                       {session.status === 'fechado' && (
                         <button
@@ -80,7 +83,7 @@ export function CashHistoryReportPage() {
                             const reason = prompt('Motivo da reabertura do caixa:');
                             if (reason) reopen.mutate({ id: session.id, reason });
                           }}
-                          className="text-xs text-blue-600 hover:underline"
+                          className="text-xs text-amber-600 hover:underline"
                         >
                           Reabrir
                         </button>
@@ -92,7 +95,7 @@ export function CashHistoryReportPage() {
             })}
             {data?.length === 0 && (
               <tr>
-                <td colSpan={user?.role === 'admin' ? 7 : 6} className="py-6 text-center text-neutral-400">
+                <td colSpan={canReopen ? 8 : 7} className="py-6 text-center text-slate-400">
                   Nenhum fechamento de caixa no período.
                 </td>
               </tr>

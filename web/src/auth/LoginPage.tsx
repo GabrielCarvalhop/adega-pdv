@@ -42,10 +42,10 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-100">
+    <div className="flex min-h-screen items-center justify-center bg-gray-100">
       <div className="w-full max-w-sm rounded-xl bg-white p-8 shadow-lg">
-        <h1 className="mb-1 text-center text-2xl font-bold text-neutral-800">Adega PDV</h1>
-        <p className="mb-4 text-center text-xs uppercase tracking-wide text-neutral-400">
+        <h1 className="mb-1 text-center text-2xl font-serif font-semibold text-gray-900">Adega PDV</h1>
+        <p className="mb-4 text-center text-xs uppercase tracking-wide text-slate-400">
           Loja: {slug}
         </p>
 
@@ -57,8 +57,8 @@ export function LoginPage() {
 
         {!selected && !isError && (
           <>
-            <p className="mb-4 text-center text-sm text-neutral-500">Selecione o operador</p>
-            {isLoading && <p className="text-center text-neutral-400">Carregando...</p>}
+            <p className="mb-4 text-center text-sm text-slate-500">Selecione o operador</p>
+            {isLoading && <p className="text-center text-slate-400">Carregando...</p>}
             <div className="space-y-2">
               {users?.map((u) => (
                 <button
@@ -68,10 +68,10 @@ export function LoginPage() {
                     setPin('');
                     setError(null);
                   }}
-                  className="flex w-full items-center justify-between rounded-lg border border-neutral-200 px-4 py-3 text-left hover:bg-neutral-50"
+                  className="flex w-full items-center justify-between rounded-xl border border-gray-300 px-4 py-3 text-left hover:bg-gray-100"
                 >
-                  <span className="font-medium text-neutral-800">{u.name}</span>
-                  <span className="text-xs uppercase text-neutral-400">{u.role}</span>
+                  <span className="font-medium text-gray-900">{u.name}</span>
+                  <span className="text-xs uppercase text-slate-400">{u.role}</span>
                 </button>
               ))}
             </div>
@@ -80,14 +80,14 @@ export function LoginPage() {
 
         {selected && (
           <>
-            <p className="mb-1 text-center text-sm text-neutral-500">Olá,</p>
-            <p className="mb-4 text-center text-lg font-semibold text-neutral-800">{selected.name}</p>
+            <p className="mb-1 text-center text-sm text-slate-500">Olá,</p>
+            <p className="mb-4 text-center text-lg font-semibold text-gray-900">{selected.name}</p>
 
             <div className="mb-4 flex justify-center gap-2">
               {Array.from({ length: Math.max(4, pin.length) }).map((_, i) => (
                 <div
                   key={i}
-                  className={`h-3 w-3 rounded-full ${i < pin.length ? 'bg-blue-600' : 'bg-neutral-200'}`}
+                  className={`h-3 w-3 rounded-full ${i < pin.length ? 'bg-amber-600' : 'bg-gray-200'}`}
                 />
               ))}
             </div>
@@ -99,27 +99,27 @@ export function LoginPage() {
                 <button
                   key={d}
                   onClick={() => press(d)}
-                  className="rounded-lg bg-neutral-100 py-4 text-xl font-semibold hover:bg-neutral-200"
+                  className="rounded-lg bg-gray-100 py-4 text-xl font-semibold hover:bg-gray-200"
                 >
                   {d}
                 </button>
               ))}
               <button
                 onClick={() => setPin(pin.slice(0, -1))}
-                className="rounded-lg bg-neutral-100 py-4 text-xl hover:bg-neutral-200"
+                className="rounded-lg bg-gray-100 py-4 text-xl hover:bg-gray-200"
               >
                 ←
               </button>
               <button
                 onClick={() => press('0')}
-                className="rounded-lg bg-neutral-100 py-4 text-xl font-semibold hover:bg-neutral-200"
+                className="rounded-lg bg-gray-100 py-4 text-xl font-semibold hover:bg-gray-200"
               >
                 0
               </button>
               <button
                 onClick={() => submit(pin)}
                 disabled={pin.length < 4 || submitting}
-                className="rounded-lg bg-blue-600 py-4 text-white hover:bg-blue-700 disabled:opacity-40"
+                className="rounded-lg bg-amber-600 py-4 text-white hover:bg-amber-700 disabled:opacity-40"
               >
                 Entrar
               </button>

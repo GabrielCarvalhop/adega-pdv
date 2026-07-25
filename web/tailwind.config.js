@@ -2,7 +2,12 @@
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
-    extend: {},
+    extend: {
+      fontFamily: {
+        sans: ['"Public Sans"', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+        serif: ['Lora', 'ui-serif', 'Georgia', 'serif'],
+      },
+    },
   },
   plugins: [],
 };

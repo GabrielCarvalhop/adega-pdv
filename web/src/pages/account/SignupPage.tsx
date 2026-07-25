@@ -55,72 +55,72 @@ export function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-100 py-8">
+    <div className="flex min-h-screen items-center justify-center bg-gray-100 py-8">
       <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg">
-        <h1 className="mb-1 text-center text-2xl font-bold text-neutral-800">Crie sua adega</h1>
-        <p className="mb-6 text-center text-sm text-neutral-500">
+        <h1 className="mb-1 text-center text-2xl font-serif font-semibold text-gray-900">Crie sua adega</h1>
+        <p className="mb-6 text-center text-sm text-slate-500">
           14 dias grátis — sem cartão de crédito
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-neutral-700">Seu nome</label>
+            <label className="block text-sm font-medium text-slate-500">Seu nome</label>
             <input
               value={ownerName}
               onChange={(e) => setOwnerName(e.target.value)}
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
               autoFocus
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-700">E-mail</label>
+            <label className="block text-sm font-medium text-slate-500">E-mail</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-700">Senha</label>
+            <label className="block text-sm font-medium text-slate-500">Senha</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Mínimo 8 caracteres"
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-700">Nome da loja</label>
+            <label className="block text-sm font-medium text-slate-500">Nome da loja</label>
             <input
               value={storeName}
               onChange={(e) => handleStoreName(e.target.value)}
               placeholder="Ex: Adega do João"
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-700">Endereço da loja</label>
+            <label className="block text-sm font-medium text-slate-500">Endereço da loja</label>
             <input
               value={storeSlug}
               onChange={(e) => {
                 setSlugTouched(true);
                 setStoreSlug(slugify(e.target.value));
               }}
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 font-mono text-sm"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-mono text-sm"
               required
             />
-            <p className="mt-1 text-xs text-neutral-400">
+            <p className="mt-1 text-xs text-slate-400">
               Sua equipe entrará em: /t/{storeSlug || 'sua-loja'}/login
             </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-700">
+            <label className="block text-sm font-medium text-slate-500">
               PIN do caixa (seu acesso como administrador)
             </label>
             <input
@@ -128,7 +128,7 @@ export function SignupPage() {
               onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
               inputMode="numeric"
               placeholder="4 a 8 dígitos"
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
               required
             />
           </div>
@@ -140,9 +140,9 @@ export function SignupPage() {
           </Button>
         </form>
 
-        <p className="mt-4 text-center text-sm text-neutral-500">
+        <p className="mt-4 text-center text-sm text-slate-500">
           Já tem conta?{' '}
-          <Link to="/conta/login" className="text-blue-600 hover:underline">
+          <Link to="/conta/login" className="text-amber-600 hover:underline">
             Entrar
           </Link>
         </p>

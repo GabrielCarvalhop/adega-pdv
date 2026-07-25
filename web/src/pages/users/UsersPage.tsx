@@ -1,4 +1,4 @@
-import type { User, UserRole } from '@adega/shared';
+import type { TenantUserRole, User } from '@adega/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useState } from 'react';
 import { usersApi } from '../../api/auth.api';
@@ -8,23 +8,34 @@ import { Modal } from '../../components/ui/Modal';
 function UserModal({ user, onClose }: { user: User | null; onClose: () => void }) {
   const isEdit = Boolean(user);
   const [name, setName] = useState(user?.name ?? '');
-  const [role, setRole] = useState<UserRole>(user?.role ?? 'operador');
+  const [role, setRole] = useState<TenantUserRole>((user?.role as TenantUserRole) ?? 'FUNCIONARIO');
   const [pin, setPin] = useState('');
   const [active, setActive] = useState(user?.active ?? true);
+  const [maxDiscountPercent, setMaxDiscountPercent] = useState(
+    user?.maxDiscountPercent !== null && user?.maxDiscountPercent !== undefined
+      ? String(user.maxDiscountPercent)
+      : ''
+  );
+  const [canSellWithoutStock, setCanSellWithoutStock] = useState(user?.canSellWithoutStock ?? false);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
     mutationFn: () => {
+      const permissionFields = {
+        maxDiscountPercent: maxDiscountPercent.trim() ? Number(maxDiscountPercent) : null,
+        canSellWithoutStock,
+      };
       if (isEdit) {
         return usersApi.update(user!.id, {
           name: name.trim(),
           role,
           active,
           pin: pin ? pin : undefined,
+          ...permissionFields,
         });
       }
-      return usersApi.create({ name: name.trim(), role, pin });
+      return usersApi.create({ name: name.trim(), role, pin, ...permissionFields });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -46,28 +57,28 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
     <Modal title={isEdit ? 'Editar usuário' : 'Novo usuário'} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Nome</label>
+          <label className="block text-sm font-medium text-slate-500">Nome</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             autoFocus
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Perfil</label>
+          <label className="block text-sm font-medium text-slate-500">Perfil</label>
           <select
             value={role}
-            onChange={(e) => setRole(e.target.value as UserRole)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            onChange={(e) => setRole(e.target.value as TenantUserRole)}
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
           >
-            <option value="operador">Operador (vende e atende pedidos)</option>
-            <option value="gerente">Gerente (+ estoque, clientes, relatórios, cancelamentos)</option>
-            <option value="admin">Administrador (acesso total)</option>
+            <option value="FUNCIONARIO">Funcionário (vende e atende pedidos)</option>
+            <option value="GERENTE">Gerente (+ estoque, clientes, relatórios, cancelamentos)</option>
+            <option value="ADMIN_LOJA">Administrador (acesso total)</option>
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-neutral-700">
+          <label className="block text-sm font-medium text-slate-500">
             PIN {isEdit && '(deixe vazio para manter o atual)'}
           </label>
           <input
@@ -75,11 +86,33 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
             onChange={(e) => setPin(e.target.value)}
             inputMode="numeric"
             placeholder="4 a 8 dígitos"
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
           />
         </div>
+        <div className="rounded-xl border border-gray-300 p-3 space-y-3">
+          <p className="text-sm font-medium text-gray-900">Permissões (opcional)</p>
+          <div>
+            <label className="block text-xs text-slate-500">
+              Limite de desconto (%) — vazio usa o padrão do perfil
+            </label>
+            <input
+              value={maxDiscountPercent}
+              onChange={(e) => setMaxDiscountPercent(e.target.value)}
+              placeholder={role === 'ADMIN_LOJA' ? 'Sem limite' : role === 'GERENTE' ? '50 (padrão)' : '10 (padrão)'}
+              className="mt-1 w-32 rounded-xl border border-gray-300 px-2 py-1.5 text-sm"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-500">
+            <input
+              type="checkbox"
+              checked={canSellWithoutStock}
+              onChange={(e) => setCanSellWithoutStock(e.target.checked)}
+            />
+            Pode vender mesmo sem estoque disponível
+          </label>
+        </div>
         {isEdit && (
-          <label className="flex items-center gap-2 text-sm text-neutral-700">
+          <label className="flex items-center gap-2 text-sm text-slate-500">
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
             Usuário ativo
           </label>
@@ -109,17 +142,16 @@ export function UsersPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-neutral-800">Usuários</h1>
+      <div className="mb-6 flex items-center justify-end">
         <Button onClick={() => setShowNew(true)}>+ Novo usuário</Button>
       </div>
 
-      {isLoading && <p className="text-neutral-500">Carregando...</p>}
+      {isLoading && <p className="text-slate-500">Carregando...</p>}
 
       {!isLoading && (
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-neutral-200 text-left text-neutral-500">
+            <tr className="border-b border-gray-300 text-left text-slate-500">
               <th className="py-2">Nome</th>
               <th className="py-2">Perfil</th>
               <th className="py-2">Status</th>
@@ -128,20 +160,20 @@ export function UsersPage() {
           </thead>
           <tbody>
             {users?.map((user) => (
-              <tr key={user.id} className="border-b border-neutral-100">
-                <td className="py-2 font-medium text-neutral-800">{user.name}</td>
+              <tr key={user.id} className="border-b border-gray-200">
+                <td className="py-2 font-medium text-gray-900">{user.name}</td>
                 <td className="py-2">
-                  {user.role === 'admin' ? 'Administrador' : user.role === 'gerente' ? 'Gerente' : 'Operador'}
+                  {user.role === 'ADMIN_LOJA' ? 'Administrador' : user.role === 'GERENTE' ? 'Gerente' : 'Funcionário'}
                 </td>
                 <td className="py-2">
                   {user.active ? (
                     <span className="text-green-600">Ativo</span>
                   ) : (
-                    <span className="text-neutral-400">Inativo</span>
+                    <span className="text-slate-400">Inativo</span>
                   )}
                 </td>
                 <td className="py-2 text-right">
-                  <button onClick={() => setModalUser(user)} className="text-blue-600 hover:underline">
+                  <button onClick={() => setModalUser(user)} className="text-amber-600 hover:underline">
                     Editar
                   </button>
                 </td>

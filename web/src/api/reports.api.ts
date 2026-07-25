@@ -1,4 +1,4 @@
-import type { CashSession, DailyConsolidated } from '@adega/shared';
+import type { CashSession, DailyConsolidated, ReconciliationReport } from '@adega/shared';
 import { api } from './client';
 
 export interface DateRangeQuery {
@@ -49,7 +49,7 @@ export interface MarginReport {
 }
 
 export const reportsApi = {
-  sales: (query: DateRangeQuery & { groupBy?: 'day' | 'week' | 'month' }) =>
+  sales: (query: DateRangeQuery & { groupBy?: 'hour' | 'day' | 'week' | 'month' }) =>
     api.get<SalesByPeriod[]>(`/reports/sales${toQueryString(query)}`),
   topProducts: (query: DateRangeQuery & { limit?: number }) =>
     api.get<TopProduct[]>(`/reports/top-products${toQueryString(query)}`),
@@ -57,4 +57,6 @@ export const reportsApi = {
   cashHistory: (query: DateRangeQuery) => api.get<CashSession[]>(`/reports/cash-history${toQueryString(query)}`),
   dailyConsolidated: (date: string) =>
     api.get<DailyConsolidated>(`/reports/daily-consolidated?date=${date}`),
+  reconciliation: (query: DateRangeQuery & { cashSessionId?: number; paymentMethodId?: number }) =>
+    api.get<ReconciliationReport>(`/reports/reconciliation${toQueryString(query)}`),
 };

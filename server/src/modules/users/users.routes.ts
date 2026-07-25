@@ -1,26 +1,47 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireRole } from '../../middlewares/auth';
+import { withSystemTransaction, withTenantTransaction } from '../../db/connection';
+import { requireAuth, requireRole, requireTenant } from '../../middlewares/auth';
 import { AppError } from '../../middlewares/errorHandler';
+import { rateLimit } from '../../middlewares/rateLimit';
 import { validateBody } from '../../middlewares/validate';
 import * as service from './users.service';
+import * as repo from './users.repository';
 
 const loginSchema = z.object({
   userId: z.number().int().positive(),
   pin: z.string().min(4),
 });
 
+const superAdminLoginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+const changePinSchema = z.object({
+  pin: z.string().regex(/^\d{4,8}$/),
+});
+
+// SUPER_ADMIN nunca é criado por aqui — é papel único, atribuído por migration.
+const TENANT_ROLES = ['ADMIN_LOJA', 'GERENTE', 'FUNCIONARIO'] as const;
+
 const createUserSchema = z.object({
   name: z.string().min(1),
-  role: z.enum(['admin', 'gerente', 'operador']),
+  role: z.enum(TENANT_ROLES),
   pin: z.string().regex(/^\d{4,8}$/),
+  maxDiscountPercent: z.number().min(0).max(100).nullable().optional(),
+  canSellWithoutStock: z.boolean().optional(),
+  /** Força a troca do PIN no primeiro login — padrão true para novos usuários. */
+  mustChangePin: z.boolean().optional(),
 });
 
 const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
-  role: z.enum(['admin', 'gerente', 'operador']).optional(),
+  role: z.enum(TENANT_ROLES).optional(),
   pin: z.string().regex(/^\d{4,8}$/).optional(),
   active: z.boolean().optional(),
+  maxDiscountPercent: z.number().min(0).max(100).nullable().optional(),
+  canSellWithoutStock: z.boolean().optional(),
 });
 
 // Rotas públicas por loja (montadas em /api/t/:slug/auth, após resolveTenantBySlug).
@@ -38,9 +59,30 @@ tenantAuthRouter.post('/login', validateBody(loginSchema), async (req, res) => {
 // Rotas autenticadas de sessão (montadas em /api/auth).
 export const sessionRouter = Router();
 
-sessionRouter.get('/me', requireAuth, (req, res) => {
+// Login do dono da plataforma — sem loja, por e-mail/senha. Rate-limited como
+// o login por PIN, mesma proteção contra força bruta.
+sessionRouter.post(
+  '/super-admin-login',
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: 'super-admin-login' }),
+  validateBody(superAdminLoginSchema),
+  async (req, res) => {
+    res.json(await service.superAdminLogin(req.body.email, req.body.password));
+  }
+);
+
+sessionRouter.get('/me', requireAuth, async (req, res) => {
   const { userId, name, role, tenantId } = req.auth!;
-  res.json({ id: userId, name, role, tenantId });
+  const [storeName, mustChangePin] = await Promise.all([
+    withSystemTransaction(async (client) => {
+      if (tenantId === null) return undefined;
+      const { rows } = await client.query('SELECT store_name FROM tenants WHERE id = $1', [tenantId]);
+      return rows[0]?.store_name as string | undefined;
+    }),
+    tenantId === null
+      ? withSystemTransaction(async (client) => (await repo.findRowById(client, userId))?.must_change_pin ?? false)
+      : withTenantTransaction(tenantId, async (client) => (await repo.findRowById(client, userId))?.must_change_pin ?? false),
+  ]);
+  res.json({ id: userId, name, role, tenantId, storeName: storeName ?? null, mustChangePin });
 });
 
 // Logout com JWT é client-side (descartar o token); endpoint mantido por
@@ -49,21 +91,29 @@ sessionRouter.post('/logout', requireAuth, (_req, res) => {
   res.status(204).end();
 });
 
-// Gestão de usuários — somente admin do tenant.
+// Troca do próprio PIN — usada tanto voluntariamente quanto pelo fluxo
+// obrigatório de primeiro acesso (must_change_pin).
+sessionRouter.post('/change-pin', requireAuth, validateBody(changePinSchema), async (req, res) => {
+  await service.changeOwnPin(req.auth!.userId, req.auth!.tenantId, req.body.pin);
+  res.status(204).end();
+});
+
+// Gestão de usuários — somente admin do tenant (SUPER_ADMIN passa por requireRole,
+// mas precisa ter "entrado" numa loja primeiro — ver requireTenant).
 export const usersRouter = Router();
 
-usersRouter.use(requireAuth, requireRole('admin'));
+usersRouter.use(requireAuth, requireTenant, requireRole('ADMIN_LOJA'));
 
 usersRouter.get('/', async (req, res) => {
-  res.json(await service.listAllUsers(req.auth!.tenantId));
+  res.json(await service.listAllUsers(req.auth!.tenantId!));
 });
 
 usersRouter.post('/', validateBody(createUserSchema), async (req, res) => {
-  res.status(201).json(await service.createUser(req.auth!.tenantId, req.body, req.auth!.userId));
+  res.status(201).json(await service.createUser(req.auth!.tenantId!, req.body, req.auth!.userId));
 });
 
 usersRouter.put('/:id', validateBody(updateUserSchema), async (req, res) => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) throw new AppError('ID inválido');
-  res.json(await service.updateUser(req.auth!.tenantId, id, req.body, req.auth!.userId));
+  res.json(await service.updateUser(req.auth!.tenantId!, id, req.body, req.auth!.userId));
 });

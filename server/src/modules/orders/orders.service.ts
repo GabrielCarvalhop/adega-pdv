@@ -1,13 +1,19 @@
-import type { CreatePublicOrderRequest, OrderDetail, PaymentMethod, PublicOrderStatus } from '@adega/shared';
+import type { CreatePublicOrderRequest, OrderDetail, PublicOrderStatus } from '@adega/shared';
 import type { PoolClient } from 'pg';
 import { withTenantTransaction } from '../../db/connection';
 import { AppError } from '../../middlewares/errorHandler';
 import { logAction } from '../audit/audit.service';
 import * as cashRepo from '../cash/cash.repository';
 import * as customersRepo from '../customers/customers.repository';
+import * as ledgerRepo from '../customers/ledger.repository';
+import * as comboItemsRepo from '../products/comboItems.repository';
+import * as deliveryZonesService from '../deliveryZones/deliveryZones.service';
+import * as paymentMethodsRepo from '../paymentMethods/paymentMethods.repository';
 import * as productsRepo from '../products/products.repository';
+import * as discountsRepo from '../products/quantityDiscounts.repository';
 import * as salesRepo from '../sales/sales.repository';
-import * as stockRepo from '../stock/stock.repository';
+import * as salesService from '../sales/sales.service';
+import * as stockComposition from '../stock/stockComposition.service';
 import * as settingsService from '../settings/settings.service';
 import * as repo from './orders.repository';
 
@@ -41,22 +47,86 @@ export function createPublicOrder(tenantId: number, input: CreatePublicOrderRequ
     if (input.items.length === 0) throw new AppError('Pedido vazio');
     if (input.items.length > MAX_ITEMS_PER_ORDER) throw new AppError('Pedido com itens demais');
 
+    const paymentMethod = await paymentMethodsRepo.findById(client, input.paymentMethodIntentId);
+    if (!paymentMethod || !paymentMethod.active) {
+      throw new AppError('Meio de pagamento inválido ou indisponível', 400);
+    }
+
     let subtotalCents = 0;
     const resolved = [];
     for (const item of input.items) {
       if (item.quantity < 1 || item.quantity > MAX_QTY_PER_ITEM) {
         throw new AppError('Quantidade inválida');
       }
-      const product = await productsRepo.findById(client, item.productId);
+      // Trava a linha do produto para serializar a checagem de disponibilidade
+      // (estoque - reservas de outros pedidos pendentes) contra concorrência.
+      const product = await productsRepo.lockById(client, item.productId);
       if (!product || !product.active || !product.visibleInCatalog) {
         throw new AppError('Produto indisponível no cardápio', 400);
       }
-      const totalCents = product.salePriceCents * item.quantity;
+
+      const { resolved: addons, extraPriceCentsTotal } = await stockComposition.resolveAddonSelections(
+        client,
+        product.id,
+        item.addons
+      );
+
+      // Produtos que efetivamente consomem estoque para esta linha: o
+      // próprio produto (ou os itens fixos do combo) + complementos
+      // vinculados a produto real — cada um precisa de reserva própria para
+      // não vender além do disponível entre a criação e o aceite do pedido.
+      const stockConsumption: { productId: number; qty: number }[] = [];
+      if (product.isCombo) {
+        const comboItems = await comboItemsRepo.listByCombo(client, product.id);
+        for (const ci of comboItems) {
+          stockConsumption.push({ productId: ci.componentProductId, qty: ci.quantity * item.quantity });
+        }
+      } else {
+        stockConsumption.push({ productId: product.id, qty: item.quantity });
+      }
+      for (const addon of addons) {
+        if (addon.productIdSnapshot !== null) {
+          stockConsumption.push({ productId: addon.productIdSnapshot, qty: addon.quantity * item.quantity });
+        }
+      }
+
+      for (const consumption of stockConsumption) {
+        const consumedProduct =
+          consumption.productId === product.id ? product : await productsRepo.lockById(client, consumption.productId);
+        if (!consumedProduct) throw new AppError('Produto indisponível no cardápio', 400);
+        const reserved = await repo.reservedQuantity(client, consumedProduct.id);
+        const available = consumedProduct.stockQuantity - reserved;
+        if (available < consumption.qty) {
+          throw new AppError(
+            `"${consumedProduct.name}" está com estoque insuficiente no momento (disponível: ${Math.max(0, available)})`,
+            409
+          );
+        }
+      }
+
+      // Desconto por faixa de quantidade sempre aplicado automaticamente —
+      // não há operador no checkout público para decidir manualmente.
+      const tier = await discountsRepo.findBestTier(client, product.id, item.quantity);
+      const itemDiscount = tier
+        ? discountsRepo.computeDiscountCents(tier, item.quantity, product.salePriceCents)
+        : 0;
+      const unitPriceCents = product.salePriceCents + extraPriceCentsTotal;
+      const totalCents = unitPriceCents * item.quantity - itemDiscount;
       subtotalCents += totalCents;
-      resolved.push({ product, quantity: item.quantity, totalCents });
+      resolved.push({ product, quantity: item.quantity, totalCents, unitPriceCents, addons, stockConsumption });
     }
 
-    const deliveryFeeCents = input.fulfillment === 'entrega' ? settings.deliveryFeeCents : 0;
+    let deliveryFeeCents = 0;
+    if (input.fulfillment === 'entrega') {
+      const check = await deliveryZonesService.checkDelivery(
+        client,
+        input.district,
+        settings.deliveryFeeCents,
+        subtotalCents
+      );
+      if (!check.allowed) throw new AppError(check.reason ?? 'Entrega indisponível para este endereço', 400);
+      deliveryFeeCents = check.feeCents;
+    }
     const totalCents = subtotalCents + deliveryFeeCents;
 
     if (settings.minOrderCents > 0 && subtotalCents < settings.minOrderCents) {
@@ -64,7 +134,7 @@ export function createPublicOrder(tenantId: number, input: CreatePublicOrderRequ
         `Pedido mínimo de R$ ${(settings.minOrderCents / 100).toFixed(2).replace('.', ',')} (sem contar a entrega)`
       );
     }
-    if (input.paymentMethodIntent === 'dinheiro' && input.changeForCents !== undefined) {
+    if (paymentMethod.allowsChange && input.changeForCents !== undefined) {
       if (input.changeForCents < totalCents) {
         throw new AppError('O valor para troco não pode ser menor que o total do pedido');
       }
@@ -76,10 +146,10 @@ export function createPublicOrder(tenantId: number, input: CreatePublicOrderRequ
       customerName: input.customerName.trim(),
       customerPhone: input.customerPhone.trim(),
       address: input.address?.trim() || null,
+      district: input.district?.trim() || null,
       notes: input.notes?.trim() || null,
-      paymentMethodIntent: input.paymentMethodIntent,
-      changeForCents:
-        input.paymentMethodIntent === 'dinheiro' ? input.changeForCents ?? null : null,
+      paymentMethodIntentId: input.paymentMethodIntentId,
+      changeForCents: paymentMethod.allowsChange ? input.changeForCents ?? null : null,
       publicKey: input.publicKey,
       expiresAt,
       subtotalCents,
@@ -88,15 +158,21 @@ export function createPublicOrder(tenantId: number, input: CreatePublicOrderRequ
     });
 
     for (const r of resolved) {
-      await repo.insertOrderItem(
+      const itemId = await repo.insertOrderItem(
         client,
         orderId,
         r.product.id,
         r.product.name,
         r.quantity,
-        r.product.salePriceCents,
+        r.unitPriceCents,
         r.totalCents
       );
+      for (const addon of r.addons) {
+        await repo.insertItemAddon(client, { orderItemId: itemId, ...addon });
+      }
+      for (const consumption of r.stockConsumption) {
+        await repo.insertReservation(client, orderId, consumption.productId, consumption.qty, expiresAt);
+      }
     }
 
     return loadDetail(client, orderId);
@@ -141,22 +217,23 @@ export function acceptOrder(tenantId: number, id: number, userId: number | null)
     }
     const items = await repo.findItems(client, id);
     for (const item of items) {
-      // adjustStockQuantity lança 409 se ficaria negativo → rollback do aceite
-      const adj = await productsRepo.adjustStockQuantity(client, item.productId, -item.quantity);
-      await stockRepo.insertMovement(client, {
+      const product = await productsRepo.findById(client, item.productId);
+      // applyItemStock lança 409 se ficaria negativo → rollback do aceite
+      await stockComposition.applyItemStock(client, {
         productId: item.productId,
-        type: 'pedido',
+        isCombo: product?.isCombo ?? false,
         quantity: item.quantity,
-        prevQuantity: adj.prevQuantity,
-        nextQuantity: adj.nextQuantity,
+        sign: -1,
+        addons: item.addons,
+        movementType: 'pedido',
         reason: `Pedido online #${id}`,
-        unitCostCents: null,
-        saleId: null,
         orderId: id,
-        idempotencyKey: `order:${id}:${item.productId}`,
+        idempotencyPrefix: `order:${id}:${item.productId}`,
         userId,
       });
     }
+    // Estoque já foi debitado de verdade acima — a reserva "soft" não é mais necessária.
+    await repo.releaseReservations(client, id);
     return loadDetail(client, id);
   });
 }
@@ -168,6 +245,7 @@ export function rejectOrder(tenantId: number, id: number, reason: string, userId
       rejectReason: reason.trim(),
     });
     if (!updated) throw new AppError('Pedido não está mais pendente', 409);
+    await repo.releaseReservations(client, id);
     await logAction(client, userId, 'pedido.recusa', 'order', id, { reason: reason.trim() });
     return loadDetail(client, id);
   });
@@ -206,11 +284,13 @@ export async function sweepExpiredOrders(
   let total = 0;
   for (const tenantId of tenantIds) {
     const count = await withTenantTransaction(tenantId, async (client) => {
-      const { rowCount } = await client.query(
+      const { rows } = await client.query(
         `UPDATE orders SET status = 'expirado', concluded_at = now()
-         WHERE status = 'pendente' AND expires_at IS NOT NULL AND expires_at < now()`
+         WHERE status = 'pendente' AND expires_at IS NOT NULL AND expires_at < now()
+         RETURNING id`
       );
-      return rowCount ?? 0;
+      await repo.releaseReservationsForOrders(client, rows.map((r: { id: number }) => r.id));
+      return rows.length;
     });
     total += count;
   }
@@ -225,7 +305,7 @@ export async function sweepExpiredOrders(
 export function concludeOrder(
   tenantId: number,
   id: number,
-  input: { cashSessionId?: number; paymentMethod?: PaymentMethod; amountReceivedCents?: number },
+  input: { cashSessionId?: number; paymentMethodId?: number; amountReceivedCents?: number },
   userId: number | null
 ) {
   return withTenantTransaction(tenantId, async (client) => {
@@ -250,7 +330,9 @@ export function concludeOrder(
     }
 
     const items = await repo.findItems(client, id);
-    const method = input.paymentMethod ?? order.paymentMethodIntent;
+    const paymentMethodId = input.paymentMethodId ?? order.paymentMethodIntentId;
+    const method = await paymentMethodsRepo.findById(client, paymentMethodId);
+    if (!method) throw new AppError('Meio de pagamento inválido', 400);
     const feeNote =
       order.deliveryFeeCents > 0 ? ` (inclui taxa de entrega de R$ ${(order.deliveryFeeCents / 100).toFixed(2)})` : '';
 
@@ -273,8 +355,10 @@ export function concludeOrder(
     }
 
     const saleId = await salesRepo.insertSale(client, {
+      saleType: 'varejo',
       subtotalCents: order.totalCents,
       discountCents: 0,
+      surchargeCents: 0,
       totalCents: order.totalCents,
       cashSessionId: cashSession.id,
       userId,
@@ -284,7 +368,7 @@ export function concludeOrder(
 
     for (const item of items) {
       const product = await productsRepo.findById(client, item.productId);
-      await salesRepo.insertSaleItem(client, {
+      const saleItemId = await salesRepo.insertSaleItem(client, {
         saleId,
         productId: item.productId,
         productNameSnapshot: item.productNameSnapshot,
@@ -294,18 +378,52 @@ export function concludeOrder(
         discountCents: 0,
         totalCents: item.totalCents,
       });
+      for (const addon of item.addons) {
+        await salesRepo.insertItemAddon(client, {
+          saleItemId,
+          addonOptionId: addon.addonOptionId,
+          labelSnapshot: addon.labelSnapshot,
+          extraPriceCentsSnapshot: addon.extraPriceCentsSnapshot,
+          productIdSnapshot: addon.productIdSnapshot,
+          quantity: addon.quantity,
+        });
+      }
       // Sem adjustStockQuantity aqui: baixa já ocorreu no aceite do pedido.
     }
 
-    const amountReceivedCents =
-      method === 'dinheiro' ? input.amountReceivedCents ?? order.totalCents : null;
+    const amountReceivedCents = method.allowsChange
+      ? input.amountReceivedCents ?? order.totalCents
+      : null;
+    const netAmountCents = Math.round(order.totalCents * (1 - method.retentionPercent / 100));
     await salesRepo.insertPayment(client, {
       saleId,
-      method,
+      paymentMethodId: method.id,
       amountCents: order.totalCents,
       amountReceivedCents,
       changeCents: amountReceivedCents !== null ? amountReceivedCents - order.totalCents : 0,
+      netAmountCents,
     });
+    if (method.kind === 'fiado') {
+      await ledgerRepo.addEntry(client, {
+        customerId: customerId!,
+        type: 'fiado_venda',
+        amountCents: -order.totalCents,
+        saleId,
+        dueDate: await salesService.computeFiadoDueDate(client),
+        notes: `Pedido online #${id}`,
+        userId,
+      });
+    }
+    if (method.creditsAccount) {
+      await ledgerRepo.addEntry(client, {
+        customerId: customerId!,
+        type: 'credito_adicionado',
+        amountCents: order.totalCents,
+        saleId,
+        notes: `Pedido online #${id}`,
+        userId,
+      });
+    }
 
     const updated = await repo.transitionStatus(
       client,
@@ -334,18 +452,17 @@ export function cancelOrder(tenantId: number, id: number, reason: string, userId
     if (!updated) throw new AppError('Somente pedidos aceitos/prontos/em entrega podem ser cancelados', 409);
     const items = await repo.findItems(client, id);
     for (const item of items) {
-      const adj = await productsRepo.adjustStockQuantity(client, item.productId, item.quantity);
-      await stockRepo.insertMovement(client, {
+      const product = await productsRepo.findById(client, item.productId);
+      await stockComposition.applyItemStock(client, {
         productId: item.productId,
-        type: 'cancelamento_pedido',
+        isCombo: product?.isCombo ?? false,
         quantity: item.quantity,
-        prevQuantity: adj.prevQuantity,
-        nextQuantity: adj.nextQuantity,
+        sign: 1,
+        addons: item.addons,
+        movementType: 'cancelamento_pedido',
         reason: `Cancelamento do pedido online #${id}: ${reason.trim()}`,
-        unitCostCents: null,
-        saleId: null,
         orderId: id,
-        idempotencyKey: `order-cancel:${id}:${item.productId}`,
+        idempotencyPrefix: `order-cancel:${id}:${item.productId}`,
         userId,
       });
     }

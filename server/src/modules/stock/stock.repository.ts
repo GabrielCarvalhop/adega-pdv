@@ -13,7 +13,9 @@ interface StockMovementRow {
   sale_id: number | null;
   order_id: number | null;
   user_id: number | null;
+  cash_session_id: number | null;
   created_at: string;
+  register_label?: string | null;
 }
 
 function mapRow(row: StockMovementRow): StockMovement {
@@ -29,6 +31,8 @@ function mapRow(row: StockMovementRow): StockMovement {
     saleId: row.sale_id,
     orderId: row.order_id,
     userId: row.user_id,
+    cashSessionId: row.cash_session_id,
+    registerLabel: row.register_label ?? null,
     createdAt: row.created_at,
   };
 }
@@ -66,7 +70,11 @@ export async function listMovements(
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const { rows } = await client.query(
-    `SELECT * FROM stock_movements ${where} ORDER BY created_at DESC`,
+    `SELECT sm.*, cs.register_label
+     FROM stock_movements sm
+     LEFT JOIN cash_sessions cs ON cs.id = sm.cash_session_id
+     ${where}
+     ORDER BY sm.created_at DESC`,
     params
   );
   return rows.map(mapRow);
@@ -84,6 +92,7 @@ export interface InsertMovementInput {
   orderId?: number | null;
   idempotencyKey?: string | null;
   userId: number | null;
+  cashSessionId?: number | null;
 }
 
 export async function insertMovement(
@@ -92,8 +101,8 @@ export async function insertMovement(
 ): Promise<StockMovement> {
   const { rows } = await client.query(
     `INSERT INTO stock_movements
-      (product_id, type, quantity, prev_quantity, next_quantity, reason, unit_cost_cents, sale_id, order_id, idempotency_key, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      (product_id, type, quantity, prev_quantity, next_quantity, reason, unit_cost_cents, sale_id, order_id, idempotency_key, user_id, cash_session_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING *`,
     [
       input.productId,
@@ -107,6 +116,7 @@ export async function insertMovement(
       input.orderId ?? null,
       input.idempotencyKey ?? null,
       input.userId,
+      input.cashSessionId ?? null,
     ]
   );
   return mapRow(rows[0]);

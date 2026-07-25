@@ -39,12 +39,11 @@ export function AuditPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-neutral-800">Auditoria</h1>
+      <div className="mb-6 flex items-center justify-end">
         <select
           value={action}
           onChange={(e) => setAction(e.target.value)}
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+          className="rounded-xl border border-gray-300 px-3 py-1.5 text-sm"
         >
           <option value="">Todas as ações</option>
           {Object.entries(actionLabels).map(([value, label]) => (
@@ -55,12 +54,12 @@ export function AuditPage() {
         </select>
       </div>
 
-      {isLoading && <p className="text-neutral-500">Carregando...</p>}
+      {isLoading && <p className="text-slate-500">Carregando...</p>}
 
       {!isLoading && (
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-neutral-200 text-left text-neutral-500">
+            <tr className="border-b border-gray-300 text-left text-slate-500">
               <th className="py-2">Quando</th>
               <th className="py-2">Ação</th>
               <th className="py-2">Quem</th>
@@ -69,25 +68,25 @@ export function AuditPage() {
           </thead>
           <tbody>
             {logs?.map((log) => (
-              <tr key={log.id} className="border-b border-neutral-100 align-top">
-                <td className="whitespace-nowrap py-2 text-neutral-500">
+              <tr key={log.id} className="border-b border-gray-200 align-top">
+                <td className="whitespace-nowrap py-2 text-slate-500">
                   {new Date(log.createdAt).toLocaleString('pt-BR')}
                 </td>
-                <td className="py-2 font-medium text-neutral-800">
+                <td className="py-2 font-medium text-gray-900">
                   {actionLabels[log.action] ?? log.action}
-                  <span className="ml-1 text-xs text-neutral-400">
+                  <span className="ml-1 text-xs text-slate-400">
                     #{log.entityId ?? '—'}
                   </span>
                 </td>
                 <td className="py-2">{log.userName ?? '—'}</td>
-                <td className="max-w-md py-2 font-mono text-xs text-neutral-500">
+                <td className="max-w-md py-2 font-mono text-xs text-slate-500">
                   {log.details ? JSON.stringify(log.details) : '—'}
                 </td>
               </tr>
             ))}
             {logs?.length === 0 && (
               <tr>
-                <td colSpan={4} className="py-6 text-center text-neutral-400">
+                <td colSpan={4} className="py-6 text-center text-slate-400">
                   Nenhum registro encontrado.
                 </td>
               </tr>

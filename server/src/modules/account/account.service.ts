@@ -3,12 +3,13 @@ import { withSystemTransaction } from '../../db/connection';
 import { getJwtSecret } from '../../middlewares/auth';
 import { AppError } from '../../middlewares/errorHandler';
 import { hashPin, verifyPin } from '../users/pin';
+import { seedDefaults as seedDefaultPaymentMethods } from '../paymentMethods/paymentMethods.repository';
 import * as repo from './account.repository';
 
 export const TRIAL_DAYS = 14;
 
-const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{1,48}$/;
-const RESERVED_SLUGS = new Set(['api', 'admin', 'conta', 'cadastro', 'entrar', 'www', 'app']);
+export const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{1,48}$/;
+export const RESERVED_SLUGS = new Set(['api', 'admin', 'conta', 'cadastro', 'entrar', 'www', 'app']);
 
 export interface SignupInput {
   ownerName: string;
@@ -67,14 +68,15 @@ export async function signup(input: SignupInput) {
       hashPin(input.password)
     );
 
-    // Cria o primeiro operador (admin) da loja na MESMA transação. O
+    // Cria o primeiro operador (ADMIN_LOJA) da loja na MESMA transação. O
     // set_config transaction-local satisfaz o RLS/DEFAULT da tabela users.
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [String(tenant.id)]);
     await client.query('INSERT INTO users (name, pin_hash, role) VALUES ($1, $2, $3)', [
       input.ownerName.trim(),
       hashPin(input.pin),
-      'admin',
+      'ADMIN_LOJA',
     ]);
+    await seedDefaultPaymentMethods(client, tenant.id);
 
     return {
       token: signAccountToken(owner.id, tenant.id),

@@ -1,8 +1,12 @@
 import type {
+  AddLedgerAdjustmentRequest,
+  AddLedgerCreditRequest,
+  AddLedgerPaymentRequest,
   CreateCustomerAddressRequest,
   CreateCustomerRequest,
   Customer,
   CustomerAddress,
+  CustomerLedgerEntry,
   CustomerStats,
   UpdateCustomerRequest,
 } from '@adega/shared';
@@ -20,6 +24,13 @@ export const customersApi = {
     api.post<CustomerAddress>(`/customers/${id}/addresses`, data),
   removeAddress: (id: number, addressId: number) =>
     api.delete<void>(`/customers/${id}/addresses/${addressId}`),
+  getLedger: (id: number) => api.get<CustomerLedgerEntry[]>(`/customers/${id}/ledger`),
+  addLedgerPayment: (id: number, data: AddLedgerPaymentRequest) =>
+    api.post<CustomerLedgerEntry>(`/customers/${id}/ledger/payment`, data),
+  addLedgerCredit: (id: number, data: AddLedgerCreditRequest) =>
+    api.post<CustomerLedgerEntry>(`/customers/${id}/ledger/credit`, data),
+  addLedgerAdjustment: (id: number, data: AddLedgerAdjustmentRequest) =>
+    api.post<CustomerLedgerEntry>(`/customers/${id}/ledger/adjustment`, data),
   create: (data: CreateCustomerRequest) => api.post<Customer>('/customers', data),
   update: (id: number, data: UpdateCustomerRequest) => api.put<Customer>(`/customers/${id}`, data),
   remove: (id: number) => api.delete<void>(`/customers/${id}`),

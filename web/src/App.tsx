@@ -5,10 +5,12 @@ import { LoginPage } from './auth/LoginPage';
 import { StoreEntryPage } from './auth/StoreEntryPage';
 import { Layout } from './components/Layout';
 import { AccountDashboardPage } from './pages/account/AccountDashboardPage';
+import { AddonGroupsPage } from './pages/addons/AddonGroupsPage';
+import { PlatformAdminPage } from './pages/admin/PlatformAdminPage';
 import { AuditPage } from './pages/audit/AuditPage';
 import { AccountLoginPage } from './pages/account/AccountLoginPage';
-import { SignupPage } from './pages/account/SignupPage';
 import { CashPage } from './pages/cash/CashPage';
+import { CatalogAdminPage } from './pages/catalog/CatalogAdminPage';
 import { PublicCatalogPage } from './pages/catalog/PublicCatalogPage';
 import { CustomerFormPage } from './pages/customers/CustomerFormPage';
 import { OrdersPage } from './pages/orders/OrdersPage';
@@ -20,6 +22,7 @@ import { ProductFormPage } from './pages/products/ProductFormPage';
 import { ProductListPage } from './pages/products/ProductListPage';
 import { CashHistoryReportPage } from './pages/reports/CashHistoryReportPage';
 import { DailyConsolidatedPage } from './pages/reports/DailyConsolidatedPage';
+import { ReconciliationReportPage } from './pages/reports/ReconciliationReportPage';
 import { MarginReportPage } from './pages/reports/MarginReportPage';
 import { SalesReportPage } from './pages/reports/SalesReportPage';
 import { TopProductsReportPage } from './pages/reports/TopProductsReportPage';
@@ -29,7 +32,13 @@ import { UsersPage } from './pages/users/UsersPage';
 
 function AdminRoute({ children }: { children: JSX.Element }) {
   const { user } = useAuth();
-  return user?.role === 'admin' ? children : <Navigate to="/venda" replace />;
+  const allowed = user?.role === 'ADMIN_LOJA' || user?.role === 'SUPER_ADMIN';
+  return allowed ? children : <Navigate to="/venda" replace />;
+}
+
+function SuperAdminRoute({ children }: { children: JSX.Element }) {
+  const { user } = useAuth();
+  return user?.role === 'SUPER_ADMIN' ? children : <Navigate to="/venda" replace />;
 }
 
 // Operador logado visitando a URL de login de OUTRA loja: desloga para exibir
@@ -49,7 +58,7 @@ function StoreLoginGate() {
   return <Navigate to="/venda" replace />;
 }
 
-// PDV do operador (exige login por PIN).
+// PDV do operador (exige login por PIN, ou do SUPER_ADMIN por e-mail/senha).
 function PdvRoutes() {
   const { user } = useAuth();
 
@@ -67,16 +76,39 @@ function PdvRoutes() {
     );
   }
 
+  // SUPER_ADMIN sem loja "aberta" só enxerga o painel de lojas — todo o
+  // resto das telas depende de um tenant que ele ainda não escolheu.
+  if (user.role === 'SUPER_ADMIN' && user.tenantId == null) {
+    return (
+      <Layout>
+        <Routes>
+          <Route path="/admin" element={<PlatformAdminPage />} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </Routes>
+      </Layout>
+    );
+  }
+
   return (
     <Layout>
       <Routes>
         <Route path="/" element={<Navigate to="/venda" replace />} />
         <Route path="/t/:slug/login" element={<StoreLoginGate />} />
+        <Route
+          path="/admin"
+          element={
+            <SuperAdminRoute>
+              <PlatformAdminPage />
+            </SuperAdminRoute>
+          }
+        />
         <Route path="/venda" element={<SalePage />} />
         <Route path="/estoque" element={<ProductListPage />} />
         <Route path="/estoque/novo" element={<ProductFormPage />} />
         <Route path="/estoque/:id/editar" element={<ProductFormPage />} />
         <Route path="/estoque/movimentacoes" element={<StockMovementsPage />} />
+        <Route path="/cardapio" element={<CatalogAdminPage />} />
+        <Route path="/complementos" element={<AddonGroupsPage />} />
         <Route path="/clientes" element={<CustomerListPage />} />
         <Route path="/clientes/novo" element={<CustomerFormPage />} />
         <Route path="/clientes/:id" element={<CustomerProfilePage />} />
@@ -91,6 +123,7 @@ function PdvRoutes() {
         <Route path="/relatorios/margem" element={<MarginReportPage />} />
         <Route path="/relatorios/caixa" element={<CashHistoryReportPage />} />
         <Route path="/relatorios/consolidado" element={<DailyConsolidatedPage />} />
+        <Route path="/relatorios/conferencia" element={<ReconciliationReportPage />} />
         <Route
           path="/usuarios"
           element={
@@ -116,13 +149,12 @@ export default function App() {
   const { loading } = useAuth();
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-neutral-400">Carregando...</div>;
+    return <div className="flex min-h-screen items-center justify-center text-slate-400">Carregando...</div>;
   }
 
   return (
     <Routes>
-      {/* Conta do dono da loja — independente do login de operador do PDV. */}
-      <Route path="/cadastro" element={<SignupPage />} />
+      {/* Conta do dono da loja — login legado, autoatendimento fechado (ver /cadastro). */}
       <Route path="/conta/login" element={<AccountLoginPage />} />
       <Route path="/conta" element={<AccountDashboardPage />} />
       {/* Cardápio público — cliente final, sem login. */}

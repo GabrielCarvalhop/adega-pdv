@@ -6,6 +6,7 @@ import * as cashRepo from '../src/modules/cash/cash.repository';
 import * as cashService from '../src/modules/cash/cash.service';
 import * as productsRepo from '../src/modules/products/products.repository';
 import * as salesService from '../src/modules/sales/sales.service';
+import * as paymentMethodsRepo from '../src/modules/paymentMethods/paymentMethods.repository';
 
 async function main() {
   const tenantId = await withSystemTransaction(async (c) => {
@@ -18,9 +19,11 @@ async function main() {
   });
 
   // Dois caixas abertos com fundos diferentes e um produto com estoque de sobra.
-  const { c1, c2, productId } = await withTenantTransaction(tenantId, async (c) => {
+  const { c1, c2, productId, cashMethodId } = await withTenantTransaction(tenantId, async (c) => {
     const s1 = await cashRepo.openSession(c, 10000, null, 'Caixa 1');
     const s2 = await cashRepo.openSession(c, 5000, null, 'Caixa 2');
+    await paymentMethodsRepo.seedDefaults(c, tenantId);
+    const methods = await paymentMethodsRepo.listAll(c);
     const p = await productsRepo.create(c, {
       name: 'Produto Comum',
       category: 'outro',
@@ -28,7 +31,12 @@ async function main() {
       salePriceCents: 1000,
       stockQuantity: 100,
     });
-    return { c1: s1.id, c2: s2.id, productId: p.id };
+    return {
+      c1: s1.id,
+      c2: s2.id,
+      productId: p.id,
+      cashMethodId: methods.find((m) => m.code === 'dinheiro')!.id,
+    };
   });
 
   const sell = (cashSessionId: number, qty: number) =>
@@ -36,7 +44,9 @@ async function main() {
       tenantId,
       {
         items: [{ productId, quantity: qty, unitPriceCents: 1000 }],
-        payments: [{ method: 'dinheiro', amountCents: qty * 1000, amountReceivedCents: qty * 1000 }],
+        payments: [
+          { paymentMethodId: cashMethodId, amountCents: qty * 1000, amountReceivedCents: qty * 1000 },
+        ],
         cashSessionId,
       },
       null
@@ -49,9 +59,10 @@ async function main() {
   const exp2 = await cashService.getExpected(tenantId, c2); // 5000 + 2000 = 7000
 
   // Fecha os dois ao mesmo tempo, cada um com seu valor contado.
+  const actor = { userId: null, role: 'ADMIN_LOJA' as const };
   const [close1, close2] = await Promise.all([
-    cashService.close(tenantId, c1, { countedAmountCents: exp1 }, null),
-    cashService.close(tenantId, c2, { countedAmountCents: exp2 }, null),
+    cashService.close(tenantId, c1, { countedAmountCents: exp1 }, actor),
+    cashService.close(tenantId, c2, { countedAmountCents: exp2 }, actor),
   ]);
 
   console.log(`Caixa 1: esperado ${exp1} | contado ${close1.countedAmountCents} | diferença ${close1.differenceCents}`);

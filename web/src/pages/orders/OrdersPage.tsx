@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { cashApi } from '../../api/cash.api';
 import { ordersApi } from '../../api/orders.api';
+import { paymentMethodsApi } from '../../api/paymentMethods.api';
+import { useAuth } from '../../auth/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { formatBRL } from '../../utils/money';
 
@@ -13,15 +15,8 @@ const statusLabels: Record<OrderStatus, { label: string; className: string }> = 
   saiu_entrega: { label: 'Saiu p/ entrega', className: 'bg-cyan-100 text-cyan-700' },
   concluido: { label: 'Concluído', className: 'bg-green-100 text-green-700' },
   recusado: { label: 'Recusado', className: 'bg-red-100 text-red-600' },
-  cancelado: { label: 'Cancelado', className: 'bg-neutral-200 text-neutral-600' },
-  expirado: { label: 'Expirado', className: 'bg-neutral-200 text-neutral-500' },
-};
-
-const paymentLabels: Record<string, string> = {
-  dinheiro: 'Dinheiro',
-  debito: 'Cartão débito',
-  credito: 'Cartão crédito',
-  pix: 'Pix',
+  cancelado: { label: 'Cancelado', className: 'bg-gray-200 text-slate-500' },
+  expirado: { label: 'Expirado', className: 'bg-gray-200 text-slate-500' },
 };
 
 const SOUND_KEY = 'adega_order_sound';
@@ -37,22 +32,24 @@ function elapsedLabel(createdAt: string): string {
   return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`;
 }
 
-function printOrder(detail: OrderDetail) {
+function printOrder(detail: OrderDetail, paymentLabels: Record<string, string>, storeName: string | null) {
   const { order, items } = detail;
   const win = window.open('', '_blank', 'width=400,height=600');
   if (!win) return;
   const lines = items
-    .map(
-      (i) =>
-        `<tr><td>${i.quantity}x ${i.productNameSnapshot}</td><td style="text-align:right">${formatBRL(i.totalCents)}</td></tr>`
-    )
+    .map((i) => {
+      const addonLines = i.addons
+        .map((a) => `<tr><td style="padding-left:8px;font-size:10px">+ ${a.labelSnapshot}</td><td></td></tr>`)
+        .join('');
+      return `<tr><td>${i.quantity}x ${i.productNameSnapshot}</td><td style="text-align:right">${formatBRL(i.totalCents)}</td></tr>${addonLines}`;
+    })
     .join('');
   win.document.write(`
     <html><head><title>Pedido #${order.id}</title>
     <style>body{font-family:'Courier New',monospace;font-size:12px;width:72mm;margin:0;padding:4mm}
     table{width:100%;border-collapse:collapse}h2{text-align:center;font-size:14px}hr{border:none;border-top:1px dashed #000}</style>
     </head><body>
-    <h2>PEDIDO #${order.id}</h2>
+    ${storeName ? `<h2>${storeName}</h2><p style="text-align:center;margin:0">PEDIDO #${order.id}</p>` : `<h2>PEDIDO #${order.id}</h2>`}
     <p>${new Date(order.createdAt).toLocaleString('pt-BR')}<br>
     ${order.fulfillment === 'entrega' ? 'ENTREGA' : 'RETIRADA'}<br>
     ${order.customerName} — ${order.customerPhone}
@@ -60,7 +57,7 @@ function printOrder(detail: OrderDetail) {
     ${order.notes ? `<p>Obs: ${order.notes}</p>` : ''}
     <hr><table>${lines}
     ${order.deliveryFeeCents > 0 ? `<tr><td>Taxa entrega</td><td style="text-align:right">${formatBRL(order.deliveryFeeCents)}</td></tr>` : ''}
-    <tr><td><b>TOTAL (${paymentLabels[order.paymentMethodIntent]})</b></td><td style="text-align:right"><b>${formatBRL(order.totalCents)}</b></td></tr>
+    <tr><td><b>TOTAL (${paymentLabels[order.paymentMethodIntent] ?? order.paymentMethodIntent})</b></td><td style="text-align:right"><b>${formatBRL(order.totalCents)}</b></td></tr>
     ${order.changeForCents ? `<tr><td>Troco para</td><td style="text-align:right">${formatBRL(order.changeForCents)}</td></tr>` : ''}
     </table><hr></body></html>
   `);
@@ -68,8 +65,9 @@ function printOrder(detail: OrderDetail) {
   win.print();
 }
 
-function OrderCard({ detail }: { detail: OrderDetail }) {
+function OrderCard({ detail, paymentLabels }: { detail: OrderDetail; paymentLabels: Record<string, string> }) {
   const { order, items } = detail;
+  const { user } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
@@ -108,43 +106,50 @@ function OrderCard({ detail }: { detail: OrderDetail }) {
   const active = ['pendente', 'aceito', 'pronto', 'saiu_entrega'].includes(order.status);
 
   return (
-    <div className="rounded-lg border border-neutral-200 p-4">
+    <div className="rounded-xl border border-gray-300 p-4">
       <div className="mb-2 flex items-center justify-between">
-        <p className="font-semibold text-neutral-800">
+        <p className="font-semibold text-gray-900">
           Pedido #{order.id} · {order.fulfillment === 'entrega' ? 'Entrega' : 'Retirada'}
-          {active && <span className="ml-2 text-xs font-normal text-neutral-400">{elapsedLabel(order.createdAt)}</span>}
+          {active && <span className="ml-2 text-xs font-normal text-slate-400">{elapsedLabel(order.createdAt)}</span>}
         </p>
         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${status.className}`}>
           {status.label}
         </span>
       </div>
 
-      <p className="text-sm text-neutral-600">
+      <p className="text-sm text-slate-500">
         {order.customerName} · {order.customerPhone}
       </p>
-      {order.address && <p className="text-sm text-neutral-500">{order.address}</p>}
-      {order.notes && <p className="text-sm italic text-neutral-500">"{order.notes}"</p>}
+      {order.address && <p className="text-sm text-slate-500">{order.address}</p>}
+      {order.notes && <p className="text-sm italic text-slate-500">"{order.notes}"</p>}
       {order.rejectReason && (
         <p className="text-sm text-red-500">Motivo: {order.rejectReason}</p>
       )}
 
-      <ul className="mt-2 border-t border-neutral-100 pt-2 text-sm">
+      <ul className="mt-2 border-t border-gray-200 pt-2 text-sm">
         {items.map((item) => (
-          <li key={item.id} className="flex justify-between py-0.5">
-            <span>
-              {item.quantity}x {item.productNameSnapshot}
-            </span>
-            <span>{formatBRL(item.totalCents)}</span>
+          <li key={item.id} className="py-0.5">
+            <div className="flex justify-between">
+              <span>
+                {item.quantity}x {item.productNameSnapshot}
+              </span>
+              <span>{formatBRL(item.totalCents)}</span>
+            </div>
+            {item.addons.map((addon) => (
+              <div key={addon.id} className="pl-3 text-xs text-slate-400">
+                + {addon.labelSnapshot}
+              </div>
+            ))}
           </li>
         ))}
         {order.deliveryFeeCents > 0 && (
-          <li className="flex justify-between py-0.5 text-neutral-500">
+          <li className="flex justify-between py-0.5 text-slate-500">
             <span>Taxa de entrega</span>
             <span>{formatBRL(order.deliveryFeeCents)}</span>
           </li>
         )}
-        <li className="flex justify-between border-t border-neutral-100 py-1 font-semibold">
-          <span>Total ({paymentLabels[order.paymentMethodIntent]})</span>
+        <li className="flex justify-between border-t border-gray-200 py-1 font-semibold">
+          <span>Total ({paymentLabels[order.paymentMethodIntent] ?? order.paymentMethodIntent})</span>
           <span>{formatBRL(order.totalCents)}</span>
         </li>
         {order.changeForCents !== null && order.changeForCents > 0 && (
@@ -198,7 +203,7 @@ function OrderCard({ detail }: { detail: OrderDetail }) {
           </>
         )}
         {active && (
-          <Button variant="secondary" onClick={() => printOrder(detail)}>
+          <Button variant="secondary" onClick={() => printOrder(detail, paymentLabels, user?.storeName ?? null)}>
             Imprimir
           </Button>
         )}
@@ -221,13 +226,14 @@ export function OrdersPage() {
     refetchInterval: 15000,
   });
 
-  const counters = useMemo(() => {
-    const counts: Partial<Record<OrderStatus, number>> = {};
-    for (const o of orders ?? []) {
-      counts[o.order.status] = (counts[o.order.status] ?? 0) + 1;
-    }
-    return counts;
-  }, [orders]);
+  const { data: methods } = useQuery({
+    queryKey: ['payment-methods'],
+    queryFn: () => paymentMethodsApi.list(),
+  });
+  const paymentLabels = useMemo(
+    () => Object.fromEntries((methods ?? []).map((m) => [m.code, m.label])),
+    [methods]
+  );
 
   const visible = useMemo(() => {
     let list = orders ?? [];
@@ -251,6 +257,15 @@ export function OrdersPage() {
     return list;
   }, [orders, tab, search, fulfillmentFilter]);
 
+  const byStatus = useMemo(() => {
+    const map = new Map<OrderStatus, OrderDetail[]>();
+    for (const status of ACTIVE_STATUSES) map.set(status, []);
+    for (const detail of visible) {
+      map.get(detail.order.status)?.push(detail);
+    }
+    return map;
+  }, [visible]);
+
   function toggleSound() {
     const next = !soundOn;
     setSoundOn(next);
@@ -259,13 +274,12 @@ export function OrdersPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-neutral-800">Pedidos</h1>
+      <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
         <div className="flex items-center gap-2">
           <button
             onClick={toggleSound}
             title="Som de novo pedido"
-            className={`rounded-md px-3 py-1.5 text-sm ${soundOn ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-400'}`}
+            className={`rounded-lg px-3 py-1.5 text-sm ${soundOn ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-slate-400'}`}
           >
             {soundOn ? '🔔 Som ligado' : '🔕 Som desligado'}
           </button>
@@ -274,8 +288,8 @@ export function OrdersPage() {
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                  tab === t ? 'bg-blue-100 text-blue-700' : 'text-neutral-600 hover:bg-neutral-100'
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                  tab === t ? 'bg-amber-100 text-amber-700' : 'text-slate-500 hover:bg-gray-100'
                 }`}
               >
                 {t === 'ativos' ? 'Ativos' : 'Histórico'}
@@ -285,27 +299,17 @@ export function OrdersPage() {
         </div>
       </div>
 
-      {tab === 'ativos' && (
-        <div className="mb-4 flex flex-wrap gap-2 text-xs">
-          {ACTIVE_STATUSES.map((s) => (
-            <span key={s} className={`rounded-full px-2 py-1 font-medium ${statusLabels[s].className}`}>
-              {statusLabels[s].label}: {counters[s] ?? 0}
-            </span>
-          ))}
-        </div>
-      )}
-
       <div className="mb-4 flex flex-wrap gap-2">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Buscar por nº, nome ou telefone..."
-          className="w-64 rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+          className="w-64 rounded-xl border border-gray-300 px-3 py-1.5 text-sm"
         />
         <select
           value={fulfillmentFilter}
           onChange={(e) => setFulfillmentFilter(e.target.value)}
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+          className="rounded-xl border border-gray-300 px-3 py-1.5 text-sm"
         >
           <option value="">Entrega e retirada</option>
           <option value="entrega">Só entrega</option>
@@ -313,19 +317,47 @@ export function OrdersPage() {
         </select>
       </div>
 
-      {isLoading && <p className="text-neutral-500">Carregando...</p>}
+      {isLoading && <p className="text-slate-500">Carregando...</p>}
 
       {!isLoading && visible.length === 0 && (
-        <p className="text-neutral-400">
+        <p className="text-slate-400">
           {tab === 'ativos' ? 'Nenhum pedido ativo no momento.' : 'Nenhum pedido encontrado.'}
         </p>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {visible.map((detail) => (
-          <OrderCard key={detail.order.id} detail={detail} />
-        ))}
-      </div>
+      {!isLoading && tab === 'ativos' && visible.length > 0 && (
+        <div className="grid grid-cols-1 divide-y divide-gray-300 rounded-xl border border-gray-300 bg-white sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+          {ACTIVE_STATUSES.map((status) => {
+            const columnOrders = byStatus.get(status) ?? [];
+            return (
+              <div key={status} className="flex min-w-0 flex-col">
+                <div className="flex items-center justify-between border-b border-gray-300 bg-gray-50 px-3 py-2.5">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusLabels[status].className}`}>
+                    {statusLabels[status].label}
+                  </span>
+                  <span className="text-xs font-medium text-slate-400">{columnOrders.length}</span>
+                </div>
+                <div className="flex-1 space-y-3 p-3">
+                  {columnOrders.length === 0 && (
+                    <p className="py-6 text-center text-xs text-slate-400">Nenhum pedido</p>
+                  )}
+                  {columnOrders.map((detail) => (
+                    <OrderCard key={detail.order.id} detail={detail} paymentLabels={paymentLabels} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!isLoading && tab === 'historico' && visible.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {visible.map((detail) => (
+            <OrderCard key={detail.order.id} detail={detail} paymentLabels={paymentLabels} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

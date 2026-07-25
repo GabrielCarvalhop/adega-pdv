@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../../middlewares/auth';
 import { AppError } from '../../middlewares/errorHandler';
 import { validateBody } from '../../middlewares/validate';
+import { isStorageConfigured, supabaseStorage, UPLOADS_BUCKET } from '../../storage';
 import * as productsService from '../products/products.service';
 
 const MAX_BYTES = 500_000; // ~500 KB — leve para 4G
@@ -14,8 +13,6 @@ const ALLOWED = new Map([
   ['image/png', 'png'],
   ['image/webp', 'webp'],
 ]);
-
-export const uploadsRoot = path.join(__dirname, '..', '..', '..', 'data', 'uploads');
 
 const uploadSchema = z.object({
   purpose: z.enum(['product', 'logo', 'banner']),
@@ -26,7 +23,14 @@ const uploadSchema = z.object({
 
 export const uploadsRouter = Router();
 
-uploadsRouter.post('/', requireRole('gerente', 'admin'), validateBody(uploadSchema), async (req, res) => {
+uploadsRouter.post('/', requireRole('GERENTE', 'ADMIN_LOJA'), validateBody(uploadSchema), async (req, res) => {
+  if (!isStorageConfigured()) {
+    throw new AppError(
+      'Storage não configurado no servidor (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY ausentes)',
+      500
+    );
+  }
+
   const tenantId = req.auth!.tenantId!;
   const { purpose, productId, contentType, dataBase64 } = req.body as z.infer<typeof uploadSchema>;
 
@@ -47,13 +51,15 @@ uploadsRouter.post('/', requireRole('gerente', 'admin'), validateBody(uploadSche
   }
 
   const ext = ALLOWED.get(contentType)!;
-  const dir = path.join(uploadsRoot, String(tenantId));
-  fs.mkdirSync(dir, { recursive: true });
-  const filename = `${purpose}-${randomUUID()}.${ext}`;
-  const abs = path.join(dir, filename);
-  fs.writeFileSync(abs, buffer);
+  const path = `${tenantId}/${purpose}-${randomUUID()}.${ext}`;
 
-  const url = `/uploads/${tenantId}/${filename}`;
+  const { error } = await supabaseStorage!.storage
+    .from(UPLOADS_BUCKET)
+    .upload(path, buffer, { contentType, upsert: false });
+  if (error) throw new AppError(`Falha ao enviar imagem: ${error.message}`, 502);
+
+  const { data: publicUrlData } = supabaseStorage!.storage.from(UPLOADS_BUCKET).getPublicUrl(path);
+  const url = publicUrlData.publicUrl;
 
   if (purpose === 'product' && productId) {
     const product = await productsService.updateProduct(tenantId, productId, { imageUrl: url });

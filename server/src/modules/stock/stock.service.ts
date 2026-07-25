@@ -2,6 +2,7 @@ import type { CreateStockMovementRequest } from '@adega/shared';
 import { withTenantTransaction } from '../../db/connection';
 import { AppError } from '../../middlewares/errorHandler';
 import { logAction } from '../audit/audit.service';
+import * as cashRepo from '../cash/cash.repository';
 import * as productsRepo from '../products/products.repository';
 import * as repo from './stock.repository';
 
@@ -20,6 +21,11 @@ export function registerManualMovement(
   return withTenantTransaction(tenantId, async (client) => {
     const product = await productsRepo.findById(client, input.productId);
     if (!product) throw new AppError('Produto não encontrado', 404);
+
+    // Rastreia em qual caixa/terminal a movimentação foi feita, quando dá pra
+    // saber sem ambiguidade (exatamente um caixa aberto no momento).
+    const openSessions = await cashRepo.listOpenSessions(client);
+    const cashSessionId = openSessions.length === 1 ? openSessions[0].id : null;
 
     let delta: number;
     if (ENTRADAS.has(input.type)) {
@@ -51,6 +57,7 @@ export function registerManualMovement(
       unitCostCents: input.unitCostCents ?? null,
       saleId: null,
       userId,
+      cashSessionId,
     });
     await logAction(client, userId, 'estoque.movimento_manual', 'stock_movement', movement.id, {
       productId: product.id,

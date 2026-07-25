@@ -4,6 +4,7 @@
 // catálogo demo são inseridos só se ainda não existirem (por sku).
 import type { ProductCategory } from '@adega/shared';
 import { pool, withSystemTransaction, withTenantTransaction } from '../src/db/connection';
+import { seedDefaults as seedDefaultPaymentMethods } from '../src/modules/paymentMethods/paymentMethods.repository';
 import { hashPin } from '../src/modules/users/pin';
 
 interface CatalogSeedProduct {
@@ -99,13 +100,14 @@ async function ensureTenant(slug: string, storeName: string): Promise<number> {
     await c.query('INSERT INTO users (name, pin_hash, role) VALUES ($1, $2, $3)', [
       'Administrador',
       hashPin('1234'),
-      'admin',
+      'ADMIN_LOJA',
     ]);
     await c.query('INSERT INTO users (name, pin_hash, role) VALUES ($1, $2, $3)', [
       'Maria Operadora',
       hashPin('5678'),
-      'operador',
+      'FUNCIONARIO',
     ]);
+    await seedDefaultPaymentMethods(c, tenantId);
   });
 
   console.log(`Tenant "${slug}" criado (id ${tenantId}): admin PIN 1234, operadora PIN 5678.`);

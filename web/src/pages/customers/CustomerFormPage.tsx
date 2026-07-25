@@ -80,70 +80,70 @@ export function CustomerFormPage() {
 
   return (
     <div className="mx-auto max-w-lg p-8">
-      <h1 className="mb-6 text-2xl font-bold text-neutral-800">
+      <h1 className="mb-6 text-2xl font-bold text-gray-900">
         {isEdit ? 'Editar cliente' : 'Novo cliente'}
       </h1>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Nome *</label>
+          <label className="block text-sm font-medium text-slate-500">Nome *</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             autoFocus
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-neutral-700">Telefone</label>
+            <label className="block text-sm font-medium text-slate-500">Telefone</label>
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               onBlur={checkDuplicatePhone}
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             />
             {duplicateWarning && (
               <p className="mt-1 text-xs text-amber-600">{duplicateWarning}</p>
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-700">Documento (CPF)</label>
+            <label className="block text-sm font-medium text-slate-500">Documento (CPF)</label>
             <input
               value={document}
               onChange={(e) => setDocument(e.target.value)}
-              className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             />
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-neutral-700">E-mail</label>
+          <label className="block text-sm font-medium text-slate-500">E-mail</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Endereço</label>
+          <label className="block text-sm font-medium text-slate-500">Endereço</label>
           <input
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Observações</label>
+          <label className="block text-sm font-medium text-slate-500">Observações</label>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
           />
         </div>
 

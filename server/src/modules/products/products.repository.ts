@@ -19,11 +19,26 @@ interface ProductRow {
   image_url: string | null;
   catalog_subtitle: string | null;
   compare_at_price_cents: number | null;
+  sort_order: number;
+  is_combo: boolean;
   created_at: string;
   updated_at: string;
+  reserved_quantity?: number;
 }
 
+const PRODUCT_SELECT = `
+  SELECT p.*, COALESCE(r.reserved, 0)::int AS reserved_quantity
+  FROM products p
+  LEFT JOIN (
+    SELECT product_id, SUM(quantity) AS reserved
+    FROM stock_reservations
+    WHERE expires_at > now()
+    GROUP BY product_id
+  ) r ON r.product_id = p.id
+`;
+
 function mapRow(row: ProductRow): Product {
+  const reservedQuantity = row.reserved_quantity ?? 0;
   return {
     id: row.id,
     name: row.name,
@@ -41,9 +56,19 @@ function mapRow(row: ProductRow): Product {
     imageUrl: row.image_url,
     catalogSubtitle: row.catalog_subtitle,
     compareAtPriceCents: row.compare_at_price_cents ?? null,
+    sortOrder: row.sort_order,
+    isCombo: row.is_combo,
+    reservedQuantity,
+    availableQuantity: row.stock_quantity - reservedQuantity,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+export async function reorder(client: PoolClient, ids: number[]): Promise<void> {
+  for (let i = 0; i < ids.length; i++) {
+    await client.query('UPDATE products SET sort_order = $1 WHERE id = $2', [i, ids[i]]);
+  }
 }
 
 export interface ProductFilters {
@@ -61,30 +86,37 @@ export async function findAll(client: PoolClient, filters: ProductFilters): Prom
 
   if (filters.search) {
     params.push(`%${filters.search}%`, filters.search);
-    clauses.push(`(name ILIKE $${params.length - 1} OR barcode = $${params.length} OR sku = $${params.length})`);
+    clauses.push(`(p.name ILIKE $${params.length - 1} OR p.barcode = $${params.length} OR p.sku = $${params.length})`);
   }
   if (filters.category) {
     params.push(filters.category);
-    clauses.push(`category = $${params.length}`);
+    clauses.push(`p.category = $${params.length}`);
   }
   if (filters.active !== undefined) {
     params.push(filters.active);
-    clauses.push(`active = $${params.length}`);
+    clauses.push(`p.active = $${params.length}`);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const { rows } = await client.query(`SELECT * FROM products ${where} ORDER BY name ASC`, params);
+  const { rows } = await client.query(`${PRODUCT_SELECT} ${where} ORDER BY p.name ASC`, params);
   return rows.map(mapRow);
 }
 
 export async function findById(client: PoolClient, id: number): Promise<Product | undefined> {
-  const { rows } = await client.query('SELECT * FROM products WHERE id = $1', [id]);
+  const { rows } = await client.query(`${PRODUCT_SELECT} WHERE p.id = $1`, [id]);
+  return rows[0] ? mapRow(rows[0]) : undefined;
+}
+
+/** Trava a linha do produto até o fim da transação — usado para serializar
+ * checagens de disponibilidade (estoque - reservas) contra concorrência. */
+export async function lockById(client: PoolClient, id: number): Promise<Product | undefined> {
+  const { rows } = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [id]);
   return rows[0] ? mapRow(rows[0]) : undefined;
 }
 
 export async function findByBarcode(client: PoolClient, barcode: string): Promise<Product | undefined> {
   const { rows } = await client.query(
-    'SELECT * FROM products WHERE barcode = $1 AND active = TRUE',
+    `${PRODUCT_SELECT} WHERE p.barcode = $1 AND p.active = TRUE`,
     [barcode]
   );
   return rows[0] ? mapRow(rows[0]) : undefined;
@@ -92,7 +124,7 @@ export async function findByBarcode(client: PoolClient, barcode: string): Promis
 
 export async function findLowStock(client: PoolClient): Promise<Product[]> {
   const { rows } = await client.query(
-    'SELECT * FROM products WHERE active = TRUE AND stock_quantity <= min_stock ORDER BY name ASC'
+    `${PRODUCT_SELECT} WHERE p.active = TRUE AND p.stock_quantity <= p.min_stock ORDER BY p.name ASC`
   );
   return rows.map(mapRow);
 }
@@ -132,8 +164,8 @@ export async function update(
       name = $1, category = $2, brand = $3, volume_ml = $4, barcode = $5, sku = $6,
       cost_price_cents = $7, sale_price_cents = $8, min_stock = $9, active = $10,
       visible_in_catalog = $11, image_url = $12, catalog_subtitle = $13,
-      compare_at_price_cents = $14, updated_at = now()
-     WHERE id = $15
+      compare_at_price_cents = $14, is_combo = $15, updated_at = now()
+     WHERE id = $16
      RETURNING *`,
     [
       data.name ?? existing.name,
@@ -150,6 +182,7 @@ export async function update(
       data.imageUrl !== undefined ? data.imageUrl : existing.imageUrl,
       data.catalogSubtitle !== undefined ? data.catalogSubtitle : existing.catalogSubtitle,
       data.compareAtPriceCents !== undefined ? data.compareAtPriceCents : existing.compareAtPriceCents,
+      data.isCombo ?? existing.isCombo,
       id,
     ]
   );
@@ -176,11 +209,13 @@ export interface StockAdjustment {
 export async function adjustStockQuantity(
   client: PoolClient,
   id: number,
-  delta: number
+  delta: number,
+  allowNegative = false
 ): Promise<StockAdjustment> {
+  const guard = allowNegative ? '' : 'AND stock_quantity + $1 >= 0';
   const { rows } = await client.query(
     `UPDATE products SET stock_quantity = stock_quantity + $1, updated_at = now()
-     WHERE id = $2 AND stock_quantity + $1 >= 0
+     WHERE id = $2 ${guard}
      RETURNING stock_quantity AS next_quantity`,
     [delta, id]
   );

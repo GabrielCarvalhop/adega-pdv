@@ -11,3 +11,6 @@ server/data/pg/
 *.log
 .env
 .claude/
+
+# Projeto separado (site de terceiro) que não pertence a este repositório
+Trabalhos/

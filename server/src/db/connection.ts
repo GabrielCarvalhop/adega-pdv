@@ -14,11 +14,17 @@ const appDbPassword = process.env.APP_DB_PASSWORD ?? 'adega_app_dev';
 
 const ssl = process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined;
 
+// Força UTF8 na sessão — sem isto, o client_encoding herda o locale do SO
+// (WIN1252 em Windows), que aceita acentos (subset de Latin-1) mas quebra em
+// qualquer caractere fora dele, como emoji de 4 bytes (ex.: ícone de meio de
+// pagamento) — erro 22P05 "no equivalent in encoding WIN1252".
+const encodingOptions = '-c client_encoding=UTF8';
+
 /**
  * Pool ADMIN (superuser do provedor): usado SOMENTE por migrations/bootstrap.
  * Superusers ignoram RLS — nunca use este pool para servir requests.
  */
-export const adminPool = new Pool({ connectionString: adminUrl, ssl });
+export const adminPool = new Pool({ connectionString: adminUrl, ssl, options: encodingOptions });
 
 // Pool da APLICAÇÃO: conecta com role não-privilegiado (adega_app), sujeito a
 // RLS. Mesmo host/porta/database do admin, credenciais próprias.
@@ -30,6 +36,7 @@ export const pool = new Pool({
   user: APP_DB_ROLE,
   password: appDbPassword,
   ssl,
+  options: encodingOptions,
 });
 
 export function getAppDbPassword(): string {

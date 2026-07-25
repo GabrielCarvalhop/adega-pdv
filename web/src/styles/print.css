@@ -16,4 +16,16 @@
     font-family: 'Courier New', monospace;
     font-size: 12px;
   }
+
+  #reconciliation-print,
+  #reconciliation-print * {
+    visibility: visible;
+  }
+
+  #reconciliation-print {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
 }

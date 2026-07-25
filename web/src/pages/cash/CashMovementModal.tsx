@@ -51,21 +51,21 @@ export function CashMovementModal({ sessionId, type, onClose }: CashMovementModa
     <Modal title={titles[type]} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Valor (R$)</label>
+          <label className="block text-sm font-medium text-slate-500">Valor (R$)</label>
           <input
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0,00"
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             autoFocus
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-neutral-700">Motivo</label>
+          <label className="block text-sm font-medium text-slate-500">Motivo</label>
           <input
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2"
+            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
           />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}

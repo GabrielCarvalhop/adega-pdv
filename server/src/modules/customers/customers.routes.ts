@@ -5,6 +5,7 @@ import { requireRole } from '../../middlewares/auth';
 import { AppError } from '../../middlewares/errorHandler';
 import { validateBody } from '../../middlewares/validate';
 import * as repo from './customers.repository';
+import * as ledgerService from './ledger.service';
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -20,6 +21,16 @@ const createSchema = z.object({
 const updateSchema = createSchema.partial().extend({
   active: z.boolean().optional(),
   blocked: z.boolean().optional(),
+});
+
+const ledgerAmountSchema = z.object({
+  amountCents: z.number().int().positive(),
+  notes: z.string().max(300).optional(),
+});
+
+const ledgerAdjustmentSchema = z.object({
+  amountCents: z.number().int().refine((v) => v !== 0, 'Valor não pode ser zero'),
+  notes: z.string().min(1).max(300),
 });
 
 const addressSchema = z.object({
@@ -45,15 +56,15 @@ export const customersRouter = Router();
 
 customersRouter.get('/', async (req, res) => {
   const { search } = req.query;
-  const customers = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const customers = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.findAll(client, typeof search === 'string' ? search : undefined)
   );
   res.json(customers);
 });
 
 // Exportação CSV — dados pessoais, restrita a gerente/admin.
-customersRouter.get('/export.csv', requireRole('gerente', 'admin'), async (req, res) => {
-  const customers = await withTenantTransaction(req.auth!.tenantId, (client) =>
+customersRouter.get('/export.csv', requireRole('GERENTE', 'ADMIN_LOJA'), async (req, res) => {
+  const customers = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.findAll(client)
   );
   const header = 'nome;telefone;whatsapp;email;documento;nascimento;observacoes';
@@ -70,7 +81,7 @@ customersRouter.get('/export.csv', requireRole('gerente', 'admin'), async (req, 
 // Checagem de duplicidade por telefone (aviso no cadastro).
 customersRouter.get('/by-phone/:phone', async (req, res) => {
   const phone = Array.isArray(req.params.phone) ? req.params.phone[0] : req.params.phone;
-  const customer = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const customer = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.findByPhone(client, phone ?? '')
   );
   res.json(customer ?? null);
@@ -78,7 +89,7 @@ customersRouter.get('/by-phone/:phone', async (req, res) => {
 
 customersRouter.get('/:id', async (req, res) => {
   const id = parseId(req.params.id);
-  const customer = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const customer = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.findById(client, id)
   );
   if (!customer) throw new AppError('Cliente não encontrado', 404);
@@ -88,20 +99,20 @@ customersRouter.get('/:id', async (req, res) => {
 customersRouter.get('/:id/stats', async (req, res) => {
   const id = parseId(req.params.id);
   res.json(
-    await withTenantTransaction(req.auth!.tenantId, (client) => repo.getStats(client, id))
+    await withTenantTransaction(req.auth!.tenantId!, (client) => repo.getStats(client, id))
   );
 });
 
 customersRouter.get('/:id/addresses', async (req, res) => {
   const id = parseId(req.params.id);
   res.json(
-    await withTenantTransaction(req.auth!.tenantId, (client) => repo.listAddresses(client, id))
+    await withTenantTransaction(req.auth!.tenantId!, (client) => repo.listAddresses(client, id))
   );
 });
 
 customersRouter.post('/:id/addresses', validateBody(addressSchema), async (req, res) => {
   const id = parseId(req.params.id);
-  const address = await withTenantTransaction(req.auth!.tenantId, async (client) => {
+  const address = await withTenantTransaction(req.auth!.tenantId!, async (client) => {
     const customer = await repo.findById(client, id);
     if (!customer) throw new AppError('Cliente não encontrado', 404);
     return repo.insertAddress(client, id, req.body);
@@ -112,14 +123,14 @@ customersRouter.post('/:id/addresses', validateBody(addressSchema), async (req, 
 customersRouter.delete('/:id/addresses/:addressId', async (req, res) => {
   const id = parseId(req.params.id);
   const addressId = parseId(req.params.addressId);
-  await withTenantTransaction(req.auth!.tenantId, (client) =>
+  await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.deleteAddress(client, id, addressId)
   );
   res.status(204).end();
 });
 
 customersRouter.post('/', validateBody(createSchema), async (req, res) => {
-  const customer = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const customer = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.create(client, req.body)
   );
   res.status(201).json(customer);
@@ -127,15 +138,61 @@ customersRouter.post('/', validateBody(createSchema), async (req, res) => {
 
 customersRouter.put('/:id', validateBody(updateSchema), async (req, res) => {
   const id = parseId(req.params.id);
-  const updated = await withTenantTransaction(req.auth!.tenantId, (client) =>
+  const updated = await withTenantTransaction(req.auth!.tenantId!, (client) =>
     repo.update(client, id, req.body)
   );
   if (!updated) throw new AppError('Cliente não encontrado', 404);
   res.json(updated);
 });
 
-customersRouter.delete('/:id', requireRole('gerente', 'admin'), async (req, res) => {
+customersRouter.delete('/:id', requireRole('GERENTE', 'ADMIN_LOJA'), async (req, res) => {
   const id = parseId(req.params.id);
-  await withTenantTransaction(req.auth!.tenantId, (client) => repo.softDelete(client, id));
+  await withTenantTransaction(req.auth!.tenantId!, (client) => repo.softDelete(client, id));
   res.status(204).end();
 });
+
+customersRouter.get('/:id/ledger', async (req, res) => {
+  const id = parseId(req.params.id);
+  res.json(await ledgerService.getLedger(req.auth!.tenantId!, id));
+});
+
+customersRouter.post('/:id/ledger/payment', validateBody(ledgerAmountSchema), async (req, res) => {
+  const id = parseId(req.params.id);
+  const entry = await ledgerService.addPayment(
+    req.auth!.tenantId!,
+    id,
+    req.body.amountCents,
+    req.body.notes,
+    req.auth!.userId
+  );
+  res.status(201).json(entry);
+});
+
+customersRouter.post('/:id/ledger/credit', validateBody(ledgerAmountSchema), async (req, res) => {
+  const id = parseId(req.params.id);
+  const entry = await ledgerService.addCredit(
+    req.auth!.tenantId!,
+    id,
+    req.body.amountCents,
+    req.body.notes,
+    req.auth!.userId
+  );
+  res.status(201).json(entry);
+});
+
+customersRouter.post(
+  '/:id/ledger/adjustment',
+  requireRole('GERENTE', 'ADMIN_LOJA'),
+  validateBody(ledgerAdjustmentSchema),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    const entry = await ledgerService.addAdjustment(
+      req.auth!.tenantId!,
+      id,
+      req.body.amountCents,
+      req.body.notes,
+      req.auth!.userId
+    );
+    res.status(201).json(entry);
+  }
+);

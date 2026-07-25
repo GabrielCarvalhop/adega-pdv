@@ -1,10 +1,10 @@
-import { ButtonHTMLAttributes } from 'react';
+import { ButtonHTMLAttributes, forwardRef } from 'react';
 
 type Variant = 'primary' | 'secondary' | 'danger';
 
 const variantClasses: Record<Variant, string> = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700',
-  secondary: 'bg-neutral-200 text-neutral-800 hover:bg-neutral-300',
+  primary: 'bg-amber-600 text-white hover:bg-amber-700',
+  secondary: 'border border-gray-300 bg-gray-100 text-gray-900 hover:bg-gray-200',
   danger: 'bg-red-600 text-white hover:bg-red-700',
 };
 
@@ -12,11 +12,15 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
 }
 
-export function Button({ variant = 'primary', className = '', ...rest }: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = 'primary', className = '', ...rest },
+  ref
+) {
   return (
     <button
-      className={`rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 ${variantClasses[variant]} ${className}`}
+      ref={ref}
+      className={`rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 ${variantClasses[variant]} ${className}`}
       {...rest}
     />
   );
-}
+});

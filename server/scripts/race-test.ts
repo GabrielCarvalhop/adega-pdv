@@ -5,6 +5,7 @@ import { pool, withSystemTransaction, withTenantTransaction } from '../src/db/co
 import * as productsRepo from '../src/modules/products/products.repository';
 import * as salesService from '../src/modules/sales/sales.service';
 import * as cashRepo from '../src/modules/cash/cash.repository';
+import * as paymentMethodsRepo from '../src/modules/paymentMethods/paymentMethods.repository';
 
 const CONCURRENT_SALES = 5;
 const INITIAL_STOCK = 2; // só 2 unidades para 5 compradores
@@ -21,8 +22,10 @@ async function main() {
     return rows[0].id as number;
   });
 
-  const productId = await withTenantTransaction(tenantId, async (c) => {
+  const { productId, pixMethodId } = await withTenantTransaction(tenantId, async (c) => {
     await cashRepo.openSession(c, 0, null);
+    await paymentMethodsRepo.seedDefaults(c, tenantId);
+    const methods = await paymentMethodsRepo.listAll(c);
     const product = await productsRepo.create(c, {
       name: 'Última Garrafa',
       category: 'vinho',
@@ -30,7 +33,7 @@ async function main() {
       salePriceCents: 2000,
       stockQuantity: INITIAL_STOCK,
     });
-    return product.id;
+    return { productId: product.id, pixMethodId: methods.find((m) => m.code === 'pix_direto')!.id };
   });
 
   // Ato: N vendas de 1 unidade disparadas ao mesmo tempo.
@@ -40,7 +43,7 @@ async function main() {
         tenantId,
         {
           items: [{ productId, quantity: 1, unitPriceCents: 2000 }],
-          payments: [{ method: 'pix', amountCents: 2000 }],
+          payments: [{ paymentMethodId: pixMethodId, amountCents: 2000 }],
         },
         null
       )

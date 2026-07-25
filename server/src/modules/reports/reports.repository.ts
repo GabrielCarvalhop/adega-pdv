@@ -1,9 +1,12 @@
 import type { PoolClient } from 'pg';
 
-export type GroupBy = 'day' | 'week' | 'month';
+export type GroupBy = 'hour' | 'day' | 'week' | 'month';
 
 // to_char no Postgres substitui o strftime do SQLite. IYYY-IW = ano/semana ISO.
+// 'hour' usa só HH24 (sem data) — agrupa por hora do dia ao longo de todo o
+// período, para achar os horários de pico, não uma série temporal.
 const groupByFormat: Record<GroupBy, string> = {
+  hour: 'HH24":00"',
   day: 'YYYY-MM-DD',
   week: 'IYYY-"W"IW',
   month: 'YYYY-MM',
@@ -96,22 +99,35 @@ export interface ConsolidatedRegisterRow {
   opened_at: string;
   closed_at: string | null;
   sales_total: number;
-  dinheiro: number;
-  debito: number;
-  credito: number;
-  pix: number;
+  /** Quebra por código de meio de pagamento — chaves dinâmicas (jsonb). */
+  breakdown: Record<string, number>;
   difference_cents: number | null;
 }
 
 /** Todos os caixas abertos/fechados num dia (por opened_at), com quebra de
- * pagamento por caixa. Uma subquery agrega pagamentos por sessão para não
- * multiplicar linhas no JOIN. */
+ * pagamento por caixa. Duas CTEs: soma por (sessão, método) e depois agrega
+ * em jsonb por sessão, para não multiplicar linhas no JOIN final. */
 export async function consolidatedByDay(
   client: PoolClient,
   date: string
 ): Promise<ConsolidatedRegisterRow[]> {
   const { rows } = await client.query(
-    `SELECT
+    `WITH pay AS (
+       SELECT s.cash_session_id, pm.code AS method_code, SUM(p.amount_cents)::int AS total
+       FROM payments p
+       JOIN sales s ON s.id = p.sale_id
+       JOIN payment_methods pm ON pm.id = p.payment_method_id
+       WHERE s.status = 'concluida'
+       GROUP BY s.cash_session_id, pm.code
+     ),
+     pb AS (
+       SELECT cash_session_id,
+              SUM(total)::int AS sales_total,
+              jsonb_object_agg(method_code, total) AS breakdown
+       FROM pay
+       GROUP BY cash_session_id
+     )
+     SELECT
        cs.id AS cash_session_id,
        cs.register_label,
        cs.status,
@@ -119,23 +135,9 @@ export async function consolidatedByDay(
        cs.closed_at,
        cs.difference_cents,
        COALESCE(pb.sales_total, 0)::int AS sales_total,
-       COALESCE(pb.dinheiro, 0)::int AS dinheiro,
-       COALESCE(pb.debito, 0)::int AS debito,
-       COALESCE(pb.credito, 0)::int AS credito,
-       COALESCE(pb.pix, 0)::int AS pix
+       COALESCE(pb.breakdown, '{}'::jsonb) AS breakdown
      FROM cash_sessions cs
-     LEFT JOIN (
-       SELECT s.cash_session_id,
-              SUM(p.amount_cents) AS sales_total,
-              SUM(p.amount_cents) FILTER (WHERE p.method = 'dinheiro') AS dinheiro,
-              SUM(p.amount_cents) FILTER (WHERE p.method = 'debito') AS debito,
-              SUM(p.amount_cents) FILTER (WHERE p.method = 'credito') AS credito,
-              SUM(p.amount_cents) FILTER (WHERE p.method = 'pix') AS pix
-       FROM payments p
-       JOIN sales s ON s.id = p.sale_id
-       WHERE s.status = 'concluida'
-       GROUP BY s.cash_session_id
-     ) pb ON pb.cash_session_id = cs.id
+     LEFT JOIN pb ON pb.cash_session_id = cs.id
      WHERE cs.opened_at >= $1::date AND cs.opened_at < ($1::date + interval '1 day')
      ORDER BY cs.register_label ASC`,
     [date]
@@ -164,6 +166,58 @@ export async function channelSplitByDay(client: PoolClient, date: string): Promi
     [date]
   );
   return rows[0];
+}
+
+export interface ReconciliationFilters extends DateRange {
+  cashSessionId?: number;
+  paymentMethodId?: number;
+}
+
+export interface PaymentReconciliationRow {
+  payment_method_id: number;
+  code: string;
+  label: string;
+  kind: string;
+  count: number;
+  gross: number;
+  net: number;
+}
+
+/** Conferência financeira: pagamentos de vendas concluídas, agrupados por
+ * meio de pagamento, com filtro opcional por período, caixa e meio. Bruto =
+ * o que o cliente pagou; líquido = após a taxa de retenção snapshotada em
+ * cada pagamento (não recalcula a partir da taxa atual do meio). */
+export async function paymentReconciliation(
+  client: PoolClient,
+  filters: ReconciliationFilters
+): Promise<PaymentReconciliationRow[]> {
+  const params: unknown[] = [];
+  const clauses: string[] = [];
+  const dateFilter = dateClause(filters, params, 's.created_at');
+  if (dateFilter) clauses.push(dateFilter.replace(/^AND /, '').trim());
+  if (filters.cashSessionId !== undefined) {
+    params.push(filters.cashSessionId);
+    clauses.push(`s.cash_session_id = $${params.length}`);
+  }
+  if (filters.paymentMethodId !== undefined) {
+    params.push(filters.paymentMethodId);
+    clauses.push(`p.payment_method_id = $${params.length}`);
+  }
+  const where = ["s.status = 'concluida'", ...clauses].join(' AND ');
+  const { rows } = await client.query(
+    `SELECT pm.id AS payment_method_id, pm.code, pm.label, pm.kind,
+            COUNT(*)::int AS count,
+            SUM(p.amount_cents)::int AS gross,
+            SUM(p.net_amount_cents)::int AS net
+     FROM payments p
+     JOIN sales s ON s.id = p.sale_id
+     JOIN payment_methods pm ON pm.id = p.payment_method_id
+     WHERE ${where}
+     GROUP BY pm.id, pm.code, pm.label, pm.kind
+     ORDER BY pm.label ASC`,
+    params
+  );
+  return rows;
 }
 
 export interface MarginRow {
