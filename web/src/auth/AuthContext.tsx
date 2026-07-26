@@ -14,7 +14,7 @@ interface AuthContextValue {
   login: (slug: string, userId: number, pin: string) => Promise<void>;
   superAdminLogin: (email: string, password: string) => Promise<void>;
   /** Troca o token por um escopado à loja (SUPER_ADMIN "entrando" numa loja). */
-  applyToken: (token: string) => Promise<void>;
+  applyToken: (token: string, slug?: string) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -55,8 +55,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await authApi.me());
   }
 
-  async function applyToken(token: string) {
+  async function applyToken(token: string, slug?: string) {
     setToken(token);
+    // Sem isso, telas que montam links a partir do slug salvo (ex.: link do
+    // cardápio em Configurações) ficam com "/c/null" quando o SUPER_ADMIN
+    // entra numa loja pelo painel — o login normal salva o slug, esse fluxo
+    // alternativo tinha ficado de fora.
+    if (slug) localStorage.setItem(SLUG_KEY, slug);
     setUser(await authApi.me());
   }
 

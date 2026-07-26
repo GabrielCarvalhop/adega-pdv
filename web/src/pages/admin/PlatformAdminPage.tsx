@@ -119,7 +119,7 @@ function TenantRow({ tenant }: { tenant: TenantSummary }) {
   const enterMutation = useMutation({
     mutationFn: () => platformAdminApi.enterTenant(tenant.id),
     onSuccess: async ({ token }) => {
-      await applyToken(token);
+      await applyToken(token, tenant.slug);
       navigate('/venda');
     },
     onError: (err: Error) => setError(err.message),
