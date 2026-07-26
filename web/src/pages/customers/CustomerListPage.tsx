@@ -10,7 +10,7 @@ export function CustomerListPage() {
   const [search, setSearch] = useState('');
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const canExport = user?.role === 'ADMIN_LOJA' || user?.role === 'GERENTE';
+  const canExport = user?.role === 'ADMIN_LOJA' || user?.role === 'GERENTE' || user?.role === 'SUPER_ADMIN';
 
   const { data: customers, isLoading } = useQuery({
     queryKey: ['customers', { search }],

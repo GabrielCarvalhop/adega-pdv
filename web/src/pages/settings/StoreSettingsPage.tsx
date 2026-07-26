@@ -591,7 +591,7 @@ export function StoreSettingsPage() {
     mutation.mutate();
   }
 
-  if (user?.role !== 'ADMIN_LOJA') {
+  if (user?.role !== 'ADMIN_LOJA' && user?.role !== 'SUPER_ADMIN') {
     return <div className="p-8 text-slate-500">Somente administradores acessam as configurações.</div>;
   }
   if (isLoading) return <div className="p-8 text-slate-500">Carregando...</div>;

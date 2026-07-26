@@ -20,7 +20,7 @@ export function CashHistoryReportPage() {
     queryFn: () => reportsApi.cashHistory({ from: from || undefined, to: to || undefined }),
   });
 
-  const canReopen = user?.role === 'GERENTE' || user?.role === 'ADMIN_LOJA';
+  const canReopen = user?.role === 'GERENTE' || user?.role === 'ADMIN_LOJA' || user?.role === 'SUPER_ADMIN';
 
   const reopen = useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) => cashApi.reopen(id, reason),
