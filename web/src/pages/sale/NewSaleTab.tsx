@@ -518,7 +518,7 @@ export function NewSaleTab() {
         </div>
       </div>
 
-      <div className="border-t border-gray-200 bg-white px-6 py-2 text-center text-xs text-slate-400 print:hidden">
+      <div className="border-t border-gray-200 bg-white px-6 py-3 text-center text-sm text-slate-500 print:hidden">
         <span className="font-medium">F2</span> busca · <span className="font-medium">F3</span> cliente ·{' '}
         <span className="font-medium">F4</span> qtd · <span className="font-medium">F5</span> desconto ·{' '}
         <span className="font-medium">F6/F9</span> pagamento · <span className="font-medium">F7</span> suspender ·{' '}

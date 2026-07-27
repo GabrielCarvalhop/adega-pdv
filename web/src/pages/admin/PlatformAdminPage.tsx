@@ -41,7 +41,12 @@ function NewTenantModal({ onClose }: { onClose: () => void }) {
   }
 
   if (result) {
-    const credentialsText = `Loja: ${result.tenant.storeName}\nAcesso: ${result.loginUrl}\nUsuário: ${result.ownerName}\nPIN: ${result.initialPin}\n(o sistema vai pedir para trocar o PIN no primeiro acesso)`;
+    // Montado no navegador em vez de usar result.loginUrl (que depende de
+    // APP_BASE_URL configurado no servidor) — assim funciona certo em
+    // qualquer ambiente sem depender de variável nenhuma, igual ao link do
+    // cardápio em Configurações.
+    const loginUrl = `${window.location.origin}/t/${result.tenant.slug}/login`;
+    const credentialsText = `Loja: ${result.tenant.storeName}\nAcesso: ${loginUrl}\nUsuário: ${result.ownerName}\nPIN: ${result.initialPin}\n(o sistema vai pedir para trocar o PIN no primeiro acesso)`;
     return (
       <Modal title="Loja criada" onClose={onClose}>
         <div className="space-y-3">
