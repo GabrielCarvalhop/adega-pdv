@@ -5,10 +5,17 @@ import { authApi, LoginUser } from '../api/auth.api';
 import { Button } from '../components/ui/Button';
 import { useAuth } from './AuthContext';
 
+const SLUG_KEY = 'adega_slug';
+
 export function LoginPage() {
   const { slug } = useParams<{ slug: string }>();
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  function switchStore() {
+    localStorage.removeItem(SLUG_KEY);
+    navigate('/entrar');
+  }
   const [selected, setSelected] = useState<LoginUser | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +82,24 @@ export function LoginPage() {
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={switchStore}
+              className="mt-4 block w-full text-center text-sm text-slate-400 hover:text-amber-600"
+            >
+              Trocar de loja
+            </button>
           </>
+        )}
+
+        {isError && (
+          <button
+            type="button"
+            onClick={switchStore}
+            className="mt-4 block w-full text-center text-sm text-slate-400 hover:text-amber-600"
+          >
+            Trocar de loja
+          </button>
         )}
 
         {selected && (
