@@ -1,4 +1,5 @@
 import { Pool, PoolClient, types } from 'pg';
+import { perfMark } from '../middlewares/serverTiming';
 
 // TIMESTAMPTZ/DATE chegam como string ISO (não Date), preservando o formato
 // que os mapRow dos repositories já esperam.
@@ -43,6 +44,12 @@ export const pool = new Pool({
   password: appDbPassword,
   ssl,
   options: encodingOptions,
+  // O padrão do pg é fechar conexão ociosa após 10s — com o tráfego esparso
+  // de um PDV, quase todo request pagava o handshake TCP+TLS+auth com o
+  // pooler de novo (medido: 90-180ms perto do banco; pior entre regiões).
+  // 5 min mantém as conexões vivas entre interações do operador.
+  idleTimeoutMillis: 5 * 60 * 1000,
+  keepAlive: true,
 });
 
 export function getAppDbPassword(): string {
@@ -59,10 +66,19 @@ export async function withTenantTransaction<T>(
   tenantId: number,
   fn: (client: PoolClient) => Promise<T>
 ): Promise<T> {
+  // Interpolação exige garantir que é um inteiro — nunca uma string do cliente.
+  const tid = Number(tenantId);
+  if (!Number.isInteger(tid)) throw new Error(`tenantId inválido: ${tenantId}`);
+
+  const tConnect = performance.now();
   const client = await pool.connect();
+  const tTx = performance.now();
+  perfMark('db_connect', tTx - tConnect);
   try {
-    await client.query('BEGIN');
-    await client.query("SELECT set_config('app.tenant_id', $1, true)", [String(tenantId)]);
+    // BEGIN + set_config num único round-trip: em produção o banco fica em
+    // outra região e cada comando custa ~100ms só de rede — isso corta um
+    // comando de TODA transação de tenant do sistema.
+    await client.query(`BEGIN; SELECT set_config('app.tenant_id', '${tid}', true)`);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
@@ -71,6 +87,7 @@ export async function withTenantTransaction<T>(
     throw err;
   } finally {
     client.release();
+    perfMark('db', performance.now() - tTx);
   }
 }
 
@@ -82,7 +99,10 @@ export async function withTenantTransaction<T>(
 export async function withSystemTransaction<T>(
   fn: (client: PoolClient) => Promise<T>
 ): Promise<T> {
+  const tConnect = performance.now();
   const client = await pool.connect();
+  const tTx = performance.now();
+  perfMark('db_connect', tTx - tConnect);
   try {
     await client.query('BEGIN');
     const result = await fn(client);
@@ -93,5 +113,6 @@ export async function withSystemTransaction<T>(
     throw err;
   } finally {
     client.release();
+    perfMark('db', performance.now() - tTx);
   }
 }

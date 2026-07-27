@@ -9,6 +9,7 @@ import { requireAuth, requireTenant } from './middlewares/auth';
 import { billingGate, startTrialSweepJob } from './middlewares/billingGate';
 import { errorHandler } from './middlewares/errorHandler';
 import { rateLimit } from './middlewares/rateLimit';
+import { serverTiming } from './middlewares/serverTiming';
 import { resolveTenantBySlug } from './middlewares/tenant';
 import { accountRouter } from './modules/account/account.routes';
 import { addonsRouter } from './modules/addons/addons.routes';
@@ -30,7 +31,7 @@ import { surchargeRulesRouter } from './modules/surchargeRules/surchargeRules.ro
 import { sessionRouter, tenantAuthRouter, usersRouter } from './modules/users/users.routes';
 import { sweepExpiredOrders } from './modules/orders/orders.service';
 import { uploadsRouter } from './modules/uploads/uploads.routes';
-import { withSystemTransaction } from './db/connection';
+import { pool, withSystemTransaction } from './db/connection';
 
 function startOrderExpiryJob() {
   const listTenantIds = () =>
@@ -57,25 +58,16 @@ async function main() {
   const PORT = process.env.PORT ? Number(process.env.PORT) : 4173;
 
   app.use(cors());
+  // Server-Timing por request (auth/db_connect/db/total) — aparece na aba
+  // Network do Chrome DevTools e no log ([perf]) para requests > 500ms.
+  // Substitui o logger [slow] anterior, que só mostrava o total.
+  app.use(serverTiming);
   // Comprime JSON das APIs e o bundle estático do React (sem isso, tudo sai
   // sem gzip/brotli do processo — auditoria de performance encontrou essa
   // ausência como o achado de maior impacto/menor risco pra corrigir).
   app.use(compression());
   // Base64 de fotos do cardápio (até ~500 KB) precisa de limite maior que o default.
   app.use(express.json({ limit: '800kb' }));
-
-  // Diagnóstico temporário: loga só requests acima de 500ms, pra identificar
-  // endpoints lentos em produção sem gerar ruído nos logs em operação normal.
-  app.use((req, res, next) => {
-    const start = Date.now();
-    res.on('finish', () => {
-      const duration = Date.now() - start;
-      if (duration > 500) {
-        console.log(`[slow] ${req.method} ${req.path} ${duration}ms`);
-      }
-    });
-    next();
-  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
@@ -146,6 +138,10 @@ async function main() {
   app.listen(PORT, () => {
     console.log(`Adega PDV rodando em http://localhost:${PORT}`);
   });
+
+  // Aquece 2 conexões do pool da aplicação: o primeiro request após o deploy
+  // (ou após período ocioso) não paga o handshake TCP+TLS+auth com o pooler.
+  void Promise.all([pool.query('SELECT 1'), pool.query('SELECT 1')]).catch(() => undefined);
 }
 
 main().catch((err) => {

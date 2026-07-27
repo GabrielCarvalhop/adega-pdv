@@ -2,6 +2,7 @@ import type { UserRole } from '@adega/shared';
 import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { AppError } from './errorHandler';
+import { perfMark } from './serverTiming';
 
 export interface OperatorAuth {
   userId: number;
@@ -59,6 +60,7 @@ function extractToken(req: Request): string | undefined {
 }
 
 export function requireAuth(req: Request, _res: Response, next: NextFunction) {
+  const tAuth = performance.now();
   const token = extractToken(req);
   if (!token) throw new AppError('Não autenticado', 401);
   try {
@@ -71,6 +73,7 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
       name: payload.name,
     };
     req.tenantId = payload.tenantId;
+    perfMark('auth', performance.now() - tAuth);
     next();
   } catch (err) {
     if (err instanceof AppError) throw err;

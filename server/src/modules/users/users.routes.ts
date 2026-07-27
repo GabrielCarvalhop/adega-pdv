@@ -4,9 +4,9 @@ import { withSystemTransaction, withTenantTransaction } from '../../db/connectio
 import { requireAuth, requireRole, requireTenant } from '../../middlewares/auth';
 import { AppError } from '../../middlewares/errorHandler';
 import { rateLimit } from '../../middlewares/rateLimit';
+import { perfMark } from '../../middlewares/serverTiming';
 import { validateBody } from '../../middlewares/validate';
 import * as service from './users.service';
-import * as repo from './users.repository';
 
 const loginSchema = z.object({
   userId: z.number().int().positive(),
@@ -72,17 +72,38 @@ sessionRouter.post(
 
 sessionRouter.get('/me', requireAuth, async (req, res) => {
   const { userId, name, role, tenantId } = req.auth!;
-  const [storeName, mustChangePin] = await Promise.all([
-    withSystemTransaction(async (client) => {
-      if (tenantId === null) return undefined;
-      const { rows } = await client.query('SELECT store_name FROM tenants WHERE id = $1', [tenantId]);
-      return rows[0]?.store_name as string | undefined;
-    }),
+  // Uma única transação com uma única query: antes eram DUAS transações
+  // paralelas (7 comandos SQL no total, 2 conexões do pool) — em produção o
+  // banco fica em outra região e cada comando paga ~100ms só de rede, então
+  // /me chegava a ~2s. Subselects independentes preservam o comportamento:
+  // cada campo vem NULL se a linha não existir, sem derrubar o outro.
+  const t0 = performance.now();
+  const row =
     tenantId === null
-      ? withSystemTransaction(async (client) => (await repo.findRowById(client, userId))?.must_change_pin ?? false)
-      : withTenantTransaction(tenantId, async (client) => (await repo.findRowById(client, userId))?.must_change_pin ?? false),
-  ]);
-  res.json({ id: userId, name, role, tenantId, storeName: storeName ?? null, mustChangePin });
+      ? await withSystemTransaction(async (client) => {
+          const { rows } = await client.query(
+            'SELECT (SELECT must_change_pin FROM users WHERE id = $1) AS must_change_pin, NULL AS store_name',
+            [userId]
+          );
+          return rows[0];
+        })
+      : await withTenantTransaction(tenantId, async (client) => {
+          const { rows } = await client.query(
+            `SELECT (SELECT must_change_pin FROM users WHERE id = $1) AS must_change_pin,
+                    (SELECT store_name FROM tenants WHERE id = $2) AS store_name`,
+            [userId, tenantId]
+          );
+          return rows[0];
+        });
+  perfMark('me_db', performance.now() - t0);
+  res.json({
+    id: userId,
+    name,
+    role,
+    tenantId,
+    storeName: (row?.store_name as string | null) ?? null,
+    mustChangePin: (row?.must_change_pin as boolean | null) ?? false,
+  });
 });
 
 // Logout com JWT é client-side (descartar o token); endpoint mantido por
