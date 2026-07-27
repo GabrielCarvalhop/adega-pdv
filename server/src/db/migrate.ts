@@ -21,7 +21,15 @@ async function ensureAppRole(client: import('pg').PoolClient) {
     await client.query(
       `CREATE ROLE ${APP_DB_ROLE} LOGIN PASSWORD ${quoteLiteral(getAppDbPassword())}`
     );
-  } else {
+  } else if (process.env.RESET_APP_DB_PASSWORD === '1') {
+    // NÃO re-alterar a senha a cada boot: o pooler da Supabase (Supavisor)
+    // cacheia as credenciais, e o ALTER dessincroniza o cache — as primeiras
+    // conexões do pool falham autenticação até renovar. Essas falhas
+    // acumuladas ativam o fail2ban da Supabase, que chegou a banir o IP do
+    // próprio pooler (27/07/2026: derrubou produção inteira com
+    // "econnrefused"). Para trocar a senha de verdade: setar
+    // RESET_APP_DB_PASSWORD=1 junto com o novo APP_DB_PASSWORD por UM deploy,
+    // depois remover a flag.
     await client.query(
       `ALTER ROLE ${APP_DB_ROLE} WITH LOGIN PASSWORD ${quoteLiteral(getAppDbPassword())}`
     );
