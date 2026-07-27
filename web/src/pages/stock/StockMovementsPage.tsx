@@ -194,13 +194,6 @@ function HistoricoTab() {
     queryFn: () => stockApi.listMovements({ type: type || undefined }),
   });
 
-  const { data: products } = useQuery({
-    queryKey: ['products', { active: undefined }],
-    queryFn: () => productsApi.list(),
-  });
-
-  const productName = (id: number) => products?.find((p) => p.id === id)?.name ?? `#${id}`;
-
   const filtered = (movements ?? []).filter(
     (m) => direction === 'todas' || movementDirection(m) === direction
   );
@@ -264,7 +257,7 @@ function HistoricoTab() {
               return (
                 <tr key={m.id} className="border-b border-gray-200">
                   <td className="py-2 text-slate-500">{new Date(m.createdAt).toLocaleString('pt-BR')}</td>
-                  <td className="py-2">{productName(m.productId)}</td>
+                  <td className="py-2">{m.productName ?? `#${m.productId}`}</td>
                   <td className="py-2">
                     <span className={isEntrada ? 'text-green-600' : 'text-red-600'}>
                       {typeLabels[m.type]}

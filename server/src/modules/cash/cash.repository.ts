@@ -165,16 +165,20 @@ export async function insertMovement(
   return mapMovementRow(rows[0]);
 }
 
-export async function sumMovements(
+/** sangria + suprimento numa única consulta (GROUP BY) em vez de duas
+ * chamadas de sumMovements — evita um round-trip extra num caminho chamado
+ * a cada checagem de sangria, fechamento de caixa e resumo de conferência. */
+export async function sumMovementsByType(
   client: PoolClient,
-  sessionId: number,
-  type: CashMovementType
-): Promise<number> {
+  sessionId: number
+): Promise<Record<CashMovementType, number>> {
   const { rows } = await client.query(
-    'SELECT COALESCE(SUM(amount_cents), 0)::int AS total FROM cash_movements WHERE cash_session_id = $1 AND type = $2',
-    [sessionId, type]
+    'SELECT type, COALESCE(SUM(amount_cents), 0)::int AS total FROM cash_movements WHERE cash_session_id = $1 GROUP BY type',
+    [sessionId]
   );
-  return rows[0].total;
+  const totals: Record<CashMovementType, number> = { sangria: 0, suprimento: 0 };
+  for (const row of rows) totals[row.type as CashMovementType] = row.total;
+  return totals;
 }
 
 export async function sumCashSales(client: PoolClient, sessionId: number): Promise<number> {

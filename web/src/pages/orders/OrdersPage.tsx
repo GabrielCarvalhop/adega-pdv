@@ -7,6 +7,7 @@ import { paymentMethodsApi } from '../../api/paymentMethods.api';
 import { useAuth } from '../../auth/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { formatBRL } from '../../utils/money';
+import { isOrderSoundEnabled, setOrderSoundEnabled } from '../../utils/orderSound';
 
 const statusLabels: Record<OrderStatus, { label: string; className: string }> = {
   pendente: { label: 'Pendente', className: 'bg-amber-100 text-amber-700' },
@@ -18,12 +19,6 @@ const statusLabels: Record<OrderStatus, { label: string; className: string }> = 
   cancelado: { label: 'Cancelado', className: 'bg-gray-200 text-slate-500' },
   expirado: { label: 'Expirado', className: 'bg-gray-200 text-slate-500' },
 };
-
-const SOUND_KEY = 'adega_order_sound';
-
-export function isOrderSoundEnabled(): boolean {
-  return localStorage.getItem(SOUND_KEY) !== 'off';
-}
 
 function elapsedLabel(createdAt: string): string {
   const minutes = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000);
@@ -269,7 +264,7 @@ export function OrdersPage() {
   function toggleSound() {
     const next = !soundOn;
     setSoundOn(next);
-    localStorage.setItem(SOUND_KEY, next ? 'on' : 'off');
+    setOrderSoundEnabled(next);
   }
 
   return (

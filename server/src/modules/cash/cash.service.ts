@@ -62,14 +62,15 @@ export function getSummary(tenantId: number, sessionId: number): Promise<CashSes
     for (const row of breakdownRows) paymentBreakdown[row.method] = row.total;
 
     const agg = await repo.sessionSalesAgg(client, sessionId);
+    const movementTotals = await repo.sumMovementsByType(client, sessionId);
     return {
       session,
       salesCount: agg.salesCount,
       salesTotalCents: agg.salesTotalCents,
       paymentBreakdown,
       paymentMethods: methods,
-      suprimentosCents: await repo.sumMovements(client, sessionId, 'suprimento'),
-      sangriasCents: await repo.sumMovements(client, sessionId, 'sangria'),
+      suprimentosCents: movementTotals.suprimento,
+      sangriasCents: movementTotals.sangria,
       canceledCount: agg.canceledCount,
     };
   });
@@ -153,9 +154,8 @@ async function computeExpected(
   openingAmountCents: number
 ): Promise<number> {
   const cashSales = await repo.sumCashSales(client, sessionId);
-  const suprimentos = await repo.sumMovements(client, sessionId, 'suprimento');
-  const sangrias = await repo.sumMovements(client, sessionId, 'sangria');
-  return openingAmountCents + cashSales + suprimentos - sangrias;
+  const movementTotals = await repo.sumMovementsByType(client, sessionId);
+  return openingAmountCents + cashSales + movementTotals.suprimento - movementTotals.sangria;
 }
 
 export function close(

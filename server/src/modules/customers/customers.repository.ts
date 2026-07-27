@@ -73,6 +73,23 @@ export async function findAll(client: PoolClient, search?: string): Promise<Cust
   return rows.map(mapRow);
 }
 
+/** Versão sem o JOIN de total gasto (agregação sobre todo o histórico de
+ * vendas) — usada onde só se precisa de nome/saldo (ex.: seletor de cliente
+ * na tela de venda), pra não pagar esse custo no caminho mais quente do PDV. */
+export async function findAllLite(client: PoolClient, search?: string): Promise<Customer[]> {
+  if (search) {
+    const { rows } = await client.query(
+      `SELECT * FROM customers
+       WHERE active = TRUE AND (name ILIKE $1 OR phone ILIKE $1 OR document ILIKE $1 OR email ILIKE $1)
+       ORDER BY name ASC`,
+      [`%${search}%`]
+    );
+    return rows.map(mapRow);
+  }
+  const { rows } = await client.query('SELECT * FROM customers WHERE active = TRUE ORDER BY name ASC');
+  return rows.map(mapRow);
+}
+
 export async function findById(client: PoolClient, id: number): Promise<Customer | undefined> {
   const { rows } = await client.query(`${SELECT_WITH_SPENT} WHERE c.id = $1`, [id]);
   return rows[0] ? mapRow(rows[0]) : undefined;

@@ -79,9 +79,17 @@ export function completeSale(tenantId: number, input: CreateSaleRequest, userId:
     const actingUser = userId !== null ? await usersRepo.findById(client, userId) : undefined;
     const allowNegativeStock = actingUser?.canSellWithoutStock ?? false;
 
+    // Um único round-trip pra todos os produtos do carrinho em vez de um por
+    // item — a checagem atômica de estoque continua acontecendo depois, em
+    // adjustStockQuantity, então isso não muda nenhuma garantia de concorrência.
+    const productIds = [...new Set(input.items.map((i) => i.productId))];
+    const foundProducts = await productsRepo.findByIds(client, productIds);
+    const productsById = new Map(foundProducts.map((p) => [p.id, p]));
+    const tiersByProduct = await discountsRepo.listActiveByProducts(client, productIds);
+
     const products = [];
     for (const item of input.items) {
-      const product = await productsRepo.findById(client, item.productId);
+      const product = productsById.get(item.productId);
       if (!product) throw new AppError(`Produto #${item.productId} não encontrado`, 404);
       if (!product.active) throw new AppError(`Produto "${product.name}" está inativo`);
       if (item.quantity <= 0) throw new AppError('Quantidade deve ser positiva');
@@ -103,10 +111,12 @@ export function completeSale(tenantId: number, input: CreateSaleRequest, userId:
     const itemsToInsert = [];
     for (const { item, product, addons, extraPriceCentsTotal } of products) {
       // Desconto manual do operador tem prioridade; sem ele, aplica a melhor
-      // faixa de quantidade vigente automaticamente.
+      // faixa de quantidade vigente automaticamente (maior min_quantity <=
+      // quantidade, dentre as ativas e vigentes já buscadas em lote acima).
       let itemDiscount = item.discountCents ?? 0;
       if (itemDiscount === 0) {
-        const tier = await discountsRepo.findBestTier(client, product.id, item.quantity);
+        const tiers = tiersByProduct.get(product.id) ?? [];
+        const tier = [...tiers].reverse().find((t) => t.minQuantity <= item.quantity);
         if (tier) {
           itemDiscount = discountsRepo.computeDiscountCents(tier, item.quantity, item.unitPriceCents);
         }

@@ -154,8 +154,8 @@ export function NewSaleTab() {
   }
 
   const { data: customers } = useQuery({
-    queryKey: ['customers', { search: '' }],
-    queryFn: () => customersApi.list(),
+    queryKey: ['customers', 'lite'],
+    queryFn: () => customersApi.listLite(),
   });
 
   const subtotalCents = cart.reduce((sum, l) => sum + lineTotalCents(l), 0);

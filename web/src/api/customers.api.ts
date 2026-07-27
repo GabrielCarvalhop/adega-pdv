@@ -15,6 +15,9 @@ import { api, getToken } from './client';
 export const customersApi = {
   list: (search?: string) =>
     api.get<Customer[]>(`/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  // Sem o total gasto (agregação sobre todo o histórico de vendas) — usado
+  // onde só se precisa do nome/saldo pra um seletor, ex.: tela de venda.
+  listLite: () => api.get<Customer[]>('/customers?lite=1'),
   getById: (id: number) => api.get<Customer>(`/customers/${id}`),
   getStats: (id: number) => api.get<CustomerStats>(`/customers/${id}/stats`),
   findByPhone: (phone: string) =>

@@ -185,6 +185,9 @@ export type StockMovementType =
 export interface StockMovement {
   id: number;
   productId: number;
+  /** Nome do produto no momento da consulta (via JOIN) — evita o frontend
+   * ter que buscar o catálogo inteiro só pra resolver o nome pelo id. */
+  productName: string | null;
   type: StockMovementType;
   quantity: number;
   prevQuantity: number | null;

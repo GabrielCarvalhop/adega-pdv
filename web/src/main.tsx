@@ -12,6 +12,12 @@ const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
+      // Sem isso o padrão é staleTime: 0 — toda navegação entre telas (ex.:
+      // Produtos → Estoque → Produtos) rebusca do zero mesmo com dado ainda
+      // fresco. 15s casa com o intervalo de polling já usado no resto do
+      // app; mutações continuam invalidando queries explicitamente, então
+      // uma escrita nunca fica "escondida" atrás do cache.
+      staleTime: 15000,
     },
   },
 });

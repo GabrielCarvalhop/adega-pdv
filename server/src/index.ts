@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import compression from 'compression';
 import cors from 'cors';
 import express from 'express';
 import path from 'node:path';
@@ -56,8 +57,25 @@ async function main() {
   const PORT = process.env.PORT ? Number(process.env.PORT) : 4173;
 
   app.use(cors());
+  // Comprime JSON das APIs e o bundle estático do React (sem isso, tudo sai
+  // sem gzip/brotli do processo — auditoria de performance encontrou essa
+  // ausência como o achado de maior impacto/menor risco pra corrigir).
+  app.use(compression());
   // Base64 de fotos do cardápio (até ~500 KB) precisa de limite maior que o default.
   app.use(express.json({ limit: '800kb' }));
+
+  // Diagnóstico temporário: loga só requests acima de 500ms, pra identificar
+  // endpoints lentos em produção sem gerar ruído nos logs em operação normal.
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      if (duration > 500) {
+        console.log(`[slow] ${req.method} ${req.path} ${duration}ms`);
+      }
+    });
+    next();
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });

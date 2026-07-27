@@ -66,9 +66,15 @@ function mapRow(row: ProductRow): Product {
 }
 
 export async function reorder(client: PoolClient, ids: number[]): Promise<void> {
-  for (let i = 0; i < ids.length; i++) {
-    await client.query('UPDATE products SET sort_order = $1 WHERE id = $2', [i, ids[i]]);
-  }
+  if (ids.length === 0) return;
+  // Um único UPDATE com VALUES em vez de N round-trips sequenciais — mesmo
+  // resultado (sort_order = posição no array), sem depender do nº de produtos.
+  await client.query(
+    `UPDATE products AS p SET sort_order = v.sort_order
+     FROM (SELECT * FROM UNNEST($1::bigint[], $2::int[]) AS t(id, sort_order)) AS v
+     WHERE p.id = v.id`,
+    [ids, ids.map((_, i) => i)]
+  );
 }
 
 export interface ProductFilters {
@@ -105,6 +111,14 @@ export async function findAll(client: PoolClient, filters: ProductFilters): Prom
 export async function findById(client: PoolClient, id: number): Promise<Product | undefined> {
   const { rows } = await client.query(`${PRODUCT_SELECT} WHERE p.id = $1`, [id]);
   return rows[0] ? mapRow(rows[0]) : undefined;
+}
+
+/** Busca vários produtos numa única query — usado no checkout pra não pagar
+ * um round-trip por item do carrinho (N produtos = 1 consulta, não N). */
+export async function findByIds(client: PoolClient, ids: number[]): Promise<Product[]> {
+  if (ids.length === 0) return [];
+  const { rows } = await client.query(`${PRODUCT_SELECT} WHERE p.id = ANY($1)`, [ids]);
+  return rows.map(mapRow);
 }
 
 /** Trava a linha do produto até o fim da transação — usado para serializar

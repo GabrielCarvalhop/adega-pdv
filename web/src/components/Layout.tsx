@@ -6,7 +6,7 @@ import { ordersApi } from '../api/orders.api';
 import { useAuth } from '../auth/AuthContext';
 import { ForceChangePinModal } from './ForceChangePinModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
-import { isOrderSoundEnabled } from '../pages/orders/OrdersPage';
+import { isOrderSoundEnabled } from '../utils/orderSound';
 
 function playOrderBeep() {
   try {

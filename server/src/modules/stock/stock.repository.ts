@@ -16,12 +16,14 @@ interface StockMovementRow {
   cash_session_id: number | null;
   created_at: string;
   register_label?: string | null;
+  product_name?: string | null;
 }
 
 function mapRow(row: StockMovementRow): StockMovement {
   return {
     id: row.id,
     productId: row.product_id,
+    productName: row.product_name ?? null,
     type: row.type as StockMovementType,
     quantity: row.quantity,
     prevQuantity: row.prev_quantity,
@@ -53,28 +55,33 @@ export async function listMovements(
 
   if (filters.productId !== undefined) {
     params.push(filters.productId);
-    clauses.push(`product_id = $${params.length}`);
+    clauses.push(`sm.product_id = $${params.length}`);
   }
   if (filters.type) {
     params.push(filters.type);
-    clauses.push(`type = $${params.length}`);
+    clauses.push(`sm.type = $${params.length}`);
   }
   if (filters.from) {
     params.push(filters.from);
-    clauses.push(`created_at >= $${params.length}`);
+    clauses.push(`sm.created_at >= $${params.length}`);
   }
   if (filters.to) {
     params.push(filters.to);
-    clauses.push(`created_at <= $${params.length}`);
+    clauses.push(`sm.created_at <= $${params.length}`);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  // JOIN com products traz o nome direto — antes o frontend baixava o
+  // catálogo inteiro só pra montar esse lookup por id. LIMIT como rede de
+  // segurança contra crescimento sem fim (a tela ainda não pagina).
   const { rows } = await client.query(
-    `SELECT sm.*, cs.register_label
+    `SELECT sm.*, cs.register_label, p.name AS product_name
      FROM stock_movements sm
      LEFT JOIN cash_sessions cs ON cs.id = sm.cash_session_id
+     LEFT JOIN products p ON p.id = sm.product_id
      ${where}
-     ORDER BY sm.created_at DESC`,
+     ORDER BY sm.created_at DESC
+     LIMIT 1000`,
     params
   );
   return rows.map(mapRow);

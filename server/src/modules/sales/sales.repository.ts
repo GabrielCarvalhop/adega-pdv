@@ -198,8 +198,14 @@ export async function listSales(client: PoolClient, filters: SaleFilters): Promi
     params.push(filters.status);
     clauses.push(`status = $${params.length}`);
   }
+  // LIMIT como rede de segurança contra crescimento sem fim — a tela de
+  // histórico ainda não tem paginação; sem filtro de data/status nenhuma
+  // loja em operação hoje chega perto disso, mas evita risco futuro.
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const { rows } = await client.query(`SELECT * FROM sales ${where} ORDER BY created_at DESC`, params);
+  const { rows } = await client.query(
+    `SELECT * FROM sales ${where} ORDER BY created_at DESC LIMIT 1000`,
+    params
+  );
   return rows.map(mapSaleRow);
 }
 

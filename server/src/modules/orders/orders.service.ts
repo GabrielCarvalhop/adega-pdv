@@ -281,20 +281,23 @@ export async function sweepExpiredOrders(
   listTenantIds: () => Promise<number[]>
 ): Promise<number> {
   const tenantIds = await listTenantIds();
-  let total = 0;
-  for (const tenantId of tenantIds) {
-    const count = await withTenantTransaction(tenantId, async (client) => {
-      const { rows } = await client.query(
-        `UPDATE orders SET status = 'expirado', concluded_at = now()
-         WHERE status = 'pendente' AND expires_at IS NOT NULL AND expires_at < now()
-         RETURNING id`
-      );
-      await repo.releaseReservationsForOrders(client, rows.map((r: { id: number }) => r.id));
-      return rows.length;
-    });
-    total += count;
-  }
-  return total;
+  // Cada tenant abre sua própria transação/conexão — independentes entre si,
+  // então rodar em paralelo é seguro e não serializa o tempo do job pelo
+  // número de lojas cadastradas na plataforma.
+  const counts = await Promise.all(
+    tenantIds.map((tenantId) =>
+      withTenantTransaction(tenantId, async (client) => {
+        const { rows } = await client.query(
+          `UPDATE orders SET status = 'expirado', concluded_at = now()
+           WHERE status = 'pendente' AND expires_at IS NOT NULL AND expires_at < now()
+           RETURNING id`
+        );
+        await repo.releaseReservationsForOrders(client, rows.map((r: { id: number }) => r.id));
+        return rows.length;
+      })
+    )
+  );
+  return counts.reduce((sum, c) => sum + c, 0);
 }
 
 /**

@@ -22,8 +22,8 @@ export function SalesHistoryTab() {
   });
 
   const { data: customers } = useQuery({
-    queryKey: ['customers', { search: '' }],
-    queryFn: () => customersApi.list(),
+    queryKey: ['customers', 'lite'],
+    queryFn: () => customersApi.listLite(),
   });
   const customerName = (id: number | null) =>
     id === null ? 'Consumidor' : customers?.find((c) => c.id === id)?.name ?? `Cliente #${id}`;

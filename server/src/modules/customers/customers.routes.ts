@@ -55,9 +55,10 @@ function parseId(raw: string | string[]): number {
 export const customersRouter = Router();
 
 customersRouter.get('/', async (req, res) => {
-  const { search } = req.query;
+  const { search, lite } = req.query;
+  const searchTerm = typeof search === 'string' ? search : undefined;
   const customers = await withTenantTransaction(req.auth!.tenantId!, (client) =>
-    repo.findAll(client, typeof search === 'string' ? search : undefined)
+    lite === '1' ? repo.findAllLite(client, searchTerm) : repo.findAll(client, searchTerm)
   );
   res.json(customers);
 });
