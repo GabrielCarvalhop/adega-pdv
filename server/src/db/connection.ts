@@ -66,19 +66,19 @@ export async function withTenantTransaction<T>(
   tenantId: number,
   fn: (client: PoolClient) => Promise<T>
 ): Promise<T> {
-  // Interpolação exige garantir que é um inteiro — nunca uma string do cliente.
-  const tid = Number(tenantId);
-  if (!Number.isInteger(tid)) throw new Error(`tenantId inválido: ${tenantId}`);
-
   const tConnect = performance.now();
   const client = await pool.connect();
   const tTx = performance.now();
   perfMark('db_connect', tTx - tConnect);
   try {
-    // BEGIN + set_config num único round-trip: em produção o banco fica em
-    // outra região e cada comando custa ~100ms só de rede — isso corta um
-    // comando de TODA transação de tenant do sistema.
-    await client.query(`BEGIN; SELECT set_config('app.tenant_id', '${tid}', true)`);
+    // BEGIN e SET_CONFIG como comandos separados: tentei mesclar num round-trip
+    // só via multi-statement, mas o pooler da Supabase (Supavisor) não aceita
+    // mensagem simple-query com múltiplos comandos — dava 500 em toda
+    // transação de tenant em produção (confirmado; funcionava só no Postgres
+    // local, sem pooler). Revertido — NÃO mesclar de novo sem testar contra o
+    // pooler de produção antes de fazer deploy.
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [String(tenantId)]);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
